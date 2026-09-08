@@ -3,14 +3,14 @@ import { useSimStore } from '../store/simStore';
 
 export default function LinkAnalysis() {
   const store = useSimStore();
-  // Safe fallback if selectedLink is invalid
   const link = store.links[store.selectedLink] || store.links[0] || {};
   
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="panel-title">Link <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>UAV-{link.from + 1} ↔ UAV-{link.to + 1}</span></div>
-      
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+    <div>
+      <div className="col-section-label">
+        <span>Link UAV-{link.from + 1} ↔ UAV-{link.to + 1}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div className="data-row">
           <span className="label">Distance</span>
           <span className="value">{(link.distance || 0).toFixed(2)} km</span>
@@ -32,15 +32,15 @@ export default function LinkAnalysis() {
           <span className="value">{(link.predictedError || 0).toFixed(2)} µrad</span>
         </div>
         <div className="data-row">
-          <span className="label">Tracking Confidence</span>
+          <span className="label">Confidence</span>
           <span className="value">{((link.confidence || 0) * 100).toFixed(1)} %</span>
         </div>
         <div className="data-row">
-          <span className="label">Relative Velocity</span>
+          <span className="label">Rel. Velocity</span>
           <span className="value">{(Math.random() * 5 + 15).toFixed(1)} m/s</span>
         </div>
         <div className="data-row">
-          <span className="label">Received Power</span>
+          <span className="label">Rx Power</span>
           <span className="value">{(link.receivedPower || -30).toFixed(1)} dBm</span>
         </div>
         <div className="data-row">
@@ -49,13 +49,11 @@ export default function LinkAnalysis() {
         </div>
         <div className="data-row">
           <span className="label">Link State</span>
-          {link.state === 'LOCKED' && <span className="status-badge locked" style={{ padding: '2px 12px' }}>● LOCKED</span>}
-          {link.state === 'ACQUIRING' && <span className="status-badge acquiring" style={{ padding: '2px 12px' }}>● ACQUIRING</span>}
-          {link.state === 'LOST' && <span className="status-badge searching" style={{ padding: '2px 12px' }}>● LOST</span>}
+          <span>{link.state === 'LOCKED' && <span className="status-badge locked">LOCKED</span>}
+          {link.state === 'ACQUIRING' && <span className="status-badge acquiring">ACQUIRING</span>}
+          {link.state === 'LOST' && <span className="status-badge searching">LOST</span>}</span>
         </div>
       </div>
-
-
     </div>
   );
 }

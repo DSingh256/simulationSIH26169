@@ -5,7 +5,6 @@ export default function EventLog() {
   const events = useSimStore(s => s.eventLog);
   const scrollRef = useRef();
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -14,15 +13,15 @@ export default function EventLog() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Event Log</span>
+      <div className="col-section-label">
+        <span>Events</span>
         <button style={{ 
-          background: 'none', border: '1px solid var(--border-subtle)', 
-          color: 'var(--text-muted)', fontSize: '9px', borderRadius: '2px', cursor: 'pointer' 
+          background: 'none', border: '1px solid var(--border)', 
+          color: 'var(--text-muted)', fontSize: '8px', borderRadius: '2px', cursor: 'pointer', padding: '2px 6px'
         }} onClick={() => useSimStore.setState({ eventLog: [] })}>Clear</button>
       </div>
       
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', marginTop: 10, paddingRight: 4 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', maxHeight: 240, paddingRight: 4 }}>
         {events.map((evt, i) => (
           <div key={i} className="event-log-entry">
             <span className="timestamp">[{evt.time}]</span>
