@@ -110,20 +110,29 @@ export default function MissionWorld() {
       const uav = uavs[i];
       let [x, y, z] = uav.position;
       
-      if (store.trajectoryType === 'CIRCULAR') {
-        const speed = uav.speed * 0.001;
-        const angle = (t * speed) + (i * Math.PI * 2 / numUAVs);
-        const radius = 800;
-        x = Math.cos(angle) * radius;
-        z = Math.sin(angle) * radius;
-      } else if (store.trajectoryType === 'LINEAR') {
-        x += (uav.speed * dt * (i % 2 === 0 ? 1 : -1));
-        if (x > 2000) x = -2000;
-        if (x < -2000) x = 2000;
-      } else {
-        // Mixed/Random drift
-        x += Math.sin(t * 0.1 + i) * (uav.speed * dt);
-        z += Math.cos(t * 0.15 + i) * (uav.speed * dt);
+      const targetPos = uav.overrideActive && uav.overrideTarget ? uav.overrideTarget : uav.currentTarget;
+      
+      if (targetPos) {
+        const dx = targetPos[0] - x;
+        const dy = targetPos[1] - y;
+        const dz = targetPos[2] - z;
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        
+        if (!uav.overrideActive && dist < 50) {
+          store.popWaypoint(i);
+        } else if (dist > 1) {
+          const moveSpeed = uav.speed * 20; // scale up to match scenario dimensions
+          x += (dx / dist) * moveSpeed * dt;
+          y += (dy / dist) * moveSpeed * dt;
+          z += (dz / dist) * moveSpeed * dt;
+          
+          if (!uav.overrideActive) {
+            // Small jitter on top of waypoint tracking
+            x += Math.sin(t * 2.0 + i) * 15 * dt;
+            y += Math.cos(t * 1.5 + i) * 5 * dt;
+            z += Math.cos(t * 2.2 + i) * 15 * dt;
+          }
+        }
       }
       
       store.updateUAVPosition(i, [x, y, z], y);

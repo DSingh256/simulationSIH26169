@@ -17,6 +17,7 @@ export default function UAVNode({ uav, isActive }) {
     switch(uav.trackingState) {
       case 'LOCKED': return new THREE.Color('#ffffff');
       case 'TRACKING': return new THREE.Color('#00e676');
+      case 'REACQUIRING': return new THREE.Color('#b39ddb');
       case 'ACQUIRING': return new THREE.Color('#ffb300');
       default: return new THREE.Color('#ff3333');
     }

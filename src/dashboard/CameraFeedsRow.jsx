@@ -9,6 +9,7 @@ function MiniCameraFeed({ uav, uavIndex, isSelected, isLive, targetUav }) {
     switch(state) {
       case 'LOCKED': return '#ffffff';
       case 'TRACKING': return '#00e676';
+      case 'REACQUIRING': return '#b39ddb';
       case 'ACQUIRING': return '#ffb300';
       default: return '#ff3333';
     }

@@ -8,14 +8,22 @@ export const TrackingState = {
   ACQUIRING: 'ACQUIRING',
 };
 
+function generateWaypoint() {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = Math.random() * 1500;
+  return [Math.cos(angle) * radius, 900 + Math.random() * 200, Math.sin(angle) * radius];
+}
+
 // Generate initial UAV data
 function createUAV(id, idx) {
   const angle = (idx / 6) * Math.PI * 2;
   const radius = 800 + Math.random() * 400;
+  const pos = [Math.cos(angle) * radius, 900 + Math.random() * 200, Math.sin(angle) * radius];
+  const queue = [generateWaypoint(), generateWaypoint(), generateWaypoint()];
   return {
     id,
-    position: [Math.cos(angle) * radius, 900 + Math.random() * 200, Math.sin(angle) * radius],
-    altitude: 900 + Math.floor(Math.random() * 200),
+    position: pos,
+    altitude: Math.floor(pos[1]),
     speed: 25 + Math.floor(Math.random() * 10),
     trackingState: ['TRACKING', 'LOCKED', 'ACQUIRING', 'TRACKING', 'LOCKED', 'TRACKING'][idx],
     links: Math.floor(Math.random() * 3) + 1,
@@ -26,6 +34,13 @@ function createUAV(id, idx) {
     confidence: 0.9 + Math.random() * 0.08,
     pointingError: Math.random() * 2.5,
     detectionBox: null,
+    waypointQueue: queue,
+    currentTarget: queue[0],
+    overrideActive: false,
+    overrideTarget: null,
+    lastKnownPosition: null,
+    reacquireStartTime: 0,
+    consecutiveLockFrames: 0,
   };
 }
 
@@ -242,6 +257,41 @@ export const useSimStore = create((set, get) => ({
     const uavs = [...state.uavs];
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], trackingState: stateVal };
     return { trackingState: stateVal, uavs };
+  }),
+  setMotionOverrideActive: (idx, active) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) uavs[idx] = { ...uavs[idx], overrideActive: active };
+    return { uavs };
+  }),
+  setOverrideTarget: (idx, pos) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) uavs[idx] = { ...uavs[idx], overrideTarget: pos };
+    return { uavs };
+  }),
+  setReacquireState: (idx, startTime, lastKnownPos) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) uavs[idx] = { ...uavs[idx], reacquireStartTime: startTime, lastKnownPosition: lastKnownPos, consecutiveLockFrames: 0 };
+    return { uavs };
+  }),
+  incrementConsecutiveLockFrames: (idx) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: (uavs[idx].consecutiveLockFrames || 0) + 1 };
+    return { uavs };
+  }),
+  resetConsecutiveLockFrames: (idx) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: 0 };
+    return { uavs };
+  }),
+  popWaypoint: (idx) => set(state => {
+    const uavs = [...state.uavs];
+    if(uavs[idx]) {
+      const q = [...uavs[idx].waypointQueue];
+      q.shift();
+      q.push(generateWaypoint());
+      uavs[idx] = { ...uavs[idx], waypointQueue: q, currentTarget: q[0] };
+    }
+    return { uavs };
   }),
   setPointingError: (uavIndex, err) => set(state => {
     const uavs = [...state.uavs];

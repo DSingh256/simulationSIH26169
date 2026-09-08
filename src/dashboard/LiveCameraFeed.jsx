@@ -105,7 +105,7 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
       <Canvas gl={{ preserveDrawingBuffer: true, antialias: false, alpha: false }}>
         <LiveScene targetUav={targetUav} buildings={buildings} />
         <TrackingCameraRig sourcePos={sourceUav.position} targetPos={targetUav.position} />
-        <TrackerController uavIndex={uavIndex} />
+        <TrackerController uavIndex={uavIndex} targetUav={targetUav} />
         
         <EffectComposer disableNormalPass>
           <TurbulenceEffect intensity={0.2} />
@@ -114,6 +114,30 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
           <Vignette eskil={false} offset={0.1} darkness={0.8} />
         </EffectComposer>
       </Canvas>
+      {sourceUav.trackingState === 'REACQUIRING' && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '100px',
+          height: '100px',
+          borderRadius: '50%',
+          border: '2px dashed #b39ddb',
+          animation: 'pulse-reacquire 1.5s infinite linear',
+          pointerEvents: 'none'
+        }}>
+          <div style={{ position: 'absolute', top: '-20px', left: '50%', transform: 'translateX(-50%)', color: '#b39ddb', fontSize: '10px', whiteSpace: 'nowrap' }}>
+            SCANNING LAST KNOWN
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes pulse-reacquire {
+          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
