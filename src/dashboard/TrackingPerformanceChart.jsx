@@ -8,7 +8,7 @@ export default function TrackingPerformanceChart() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Tracking Performance <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>(Live Camera)</span></span>
+        <span>Error <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>Live</span></span>
         <div style={{ display: 'flex', gap: 12, fontSize: '9px', fontWeight: 'normal', fontFamily: "'JetBrains Mono', monospace" }}>
           <span style={{ color: 'var(--accent-blue)' }}>— Angular Error (μrad)</span>
           <span style={{ color: 'var(--text-muted)' }}>-- Predicted Error (μrad)</span>

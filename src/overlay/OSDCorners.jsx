@@ -36,31 +36,24 @@ export default function OSDCorners() {
     <>
       {/* Top Left - Timestamp & Frame */}
       <div style={{ ...baseStyle, top: 20, left: 20 }}>
-        <div>SYS_TIME: {time}</div>
-        <div>FRAME_ID: {frame.toString().padStart(5, '0')}</div>
-        <div>SENSOR_MODE: EO_IR_NARROW</div>
+        <div>{time}</div>
+        <div>FRM {frame.toString().padStart(5, '0')}</div>
       </div>
 
       {/* Top Right - Optics */}
       <div style={{ ...baseStyle, top: 20, right: 20, textAlign: 'right' }}>
-        <div>FOV: {fov.toFixed(2)}°</div>
-        <div>OPTICS: ACTIVE</div>
-        <div>FILTER: NARROWBAND</div>
+        <div>FOV {fov.toFixed(2)}°</div>
       </div>
 
       {/* Bottom Left - Tracking State */}
-      <div style={{ ...baseStyle, bottom: 20, left: 20, color: color, fontSize: '18px' }}>
-        <div>TRK_STATE: {trackingState}</div>
-        <div style={{ fontSize: '14px', color: '#00e676', marginTop: 4 }}>
-          AGC: AUTO
-        </div>
+      <div style={{ ...baseStyle, bottom: 20, left: 20, color: color, fontSize: '16px' }}>
+        <div>{trackingState}</div>
       </div>
 
       {/* Bottom Right - Pointing Error */}
       <div style={{ ...baseStyle, bottom: 20, right: 20, textAlign: 'right' }}>
-        <div>ERR_X: {(pointingError.x * 1000).toFixed(2)} mrad</div>
-        <div>ERR_Y: {(pointingError.y * 1000).toFixed(2)} mrad</div>
-        <div>BORESIGHT: ALIGNED</div>
+        <div>dX {(pointingError.x * 1000).toFixed(2)} mrad</div>
+        <div>dY {(pointingError.y * 1000).toFixed(2)} mrad</div>
       </div>
     </>
   );

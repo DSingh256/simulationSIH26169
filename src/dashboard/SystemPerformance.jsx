@@ -6,7 +6,7 @@ export default function SystemPerformance() {
   
   return (
     <div>
-      <div className="panel-title">System Performance</div>
+      <div className="panel-title">Performance</div>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
         <div className="data-row">

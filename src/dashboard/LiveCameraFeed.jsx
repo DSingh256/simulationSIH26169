@@ -123,12 +123,12 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
           width: '100px',
           height: '100px',
           borderRadius: '50%',
-          border: '2px dashed #b39ddb',
+          border: '2px dashed #8a7aaa',
           animation: 'pulse-reacquire 1.5s infinite linear',
           pointerEvents: 'none'
         }}>
-          <div style={{ position: 'absolute', top: '-20px', left: '50%', transform: 'translateX(-50%)', color: '#b39ddb', fontSize: '10px', whiteSpace: 'nowrap' }}>
-            SCANNING LAST KNOWN
+          <div style={{ position: 'absolute', top: '-18px', left: '50%', transform: 'translateX(-50%)', color: '#8a7aaa', fontSize: '9px', whiteSpace: 'nowrap', letterSpacing: '0.5px' }}>
+            SCANNING
           </div>
         </div>
       )}

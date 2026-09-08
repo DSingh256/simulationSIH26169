@@ -8,7 +8,7 @@ export default function LinkAnalysis() {
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="panel-title">Link Analysis <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>(UAV-{link.from + 1} ↔ UAV-{link.to + 1})</span></div>
+      <div className="panel-title">Link <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>UAV-{link.from + 1} ↔ UAV-{link.to + 1}</span></div>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
         <div className="data-row">
@@ -55,18 +55,7 @@ export default function LinkAnalysis() {
         </div>
       </div>
 
-      <div style={{ 
-        marginTop: 'auto', 
-        border: '1px solid var(--accent-green-dim)', 
-        background: 'rgba(0, 255, 136, 0.05)',
-        borderRadius: 'var(--radius-sm)',
-        padding: '6px',
-        textAlign: 'center',
-        color: 'var(--accent-green)'
-      }}>
-        <div style={{ fontSize: '10px', fontWeight: 600 }}>Coarse Alignment Complete</div>
-        <div style={{ fontSize: '9px', opacity: 0.8 }}>Fine Alignment Handoff Ready</div>
-      </div>
+
     </div>
   );
 }

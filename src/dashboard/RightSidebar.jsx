@@ -8,19 +8,19 @@ export default function RightSidebar() {
 
   const stateColor = (state) => {
     switch(state) {
-      case 'LOCKED': return 'blue';
+      case 'LOCKED': return 'orange';
       case 'TRACKING': return 'green';
+      case 'REACQUIRING': return 'blue';
       case 'ACQUIRING': return 'amber';
       default: return 'red';
     }
   };
 
   const stateBadge = (state) => {
-    const cls = state === 'LOCKED' ? 'locked' : state === 'TRACKING' ? 'tracking' : state === 'ACQUIRING' ? 'acquiring' : 'searching';
+    const cls = state === 'LOCKED' ? 'locked' : state === 'TRACKING' ? 'tracking' : state === 'REACQUIRING' ? 'reacquiring' : state === 'ACQUIRING' ? 'acquiring' : 'searching';
     return <span className={`status-badge ${cls}`}>{state}</span>;
   };
 
-  // Build NxN link matrix
   const matrixSize = Math.min(numUAVs, 6);
   const linkMap = {};
   links.forEach(l => {
@@ -30,16 +30,10 @@ export default function RightSidebar() {
 
   return (
     <div className="right-sidebar">
-      {/* ─── FSOC Network ─── */}
+      {/* ─── Node Table ─── */}
       <div className="panel-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <div className="panel-section-title" style={{ margin: 0 }}>FSOC Network</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '9px', color: 'var(--text-muted)' }}>
-            Auto Link Management
-            <div style={{ width: 28, height: 14, borderRadius: 7, background: 'var(--accent-blue)', position: 'relative', cursor: 'pointer' }}>
-              <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, right: 2 }}></div>
-            </div>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div className="panel-section-title" style={{ margin: 0 }}>Nodes</div>
         </div>
 
         <table className="sim-table">
@@ -47,7 +41,7 @@ export default function RightSidebar() {
             <tr>
               <th></th>
               <th>ID</th>
-              <th>Status</th>
+              <th>State</th>
               <th>Links</th>
               <th>Bat</th>
               <th>Mode</th>
@@ -75,13 +69,11 @@ export default function RightSidebar() {
           className="link-matrix" 
           style={{ gridTemplateColumns: `repeat(${matrixSize + 1}, 1fr)` }}
         >
-          {/* Header row */}
           <div className="link-matrix-cell header"></div>
           {Array.from({ length: matrixSize }, (_, i) => (
             <div key={`h${i}`} className="link-matrix-cell header">U{i + 1}</div>
           ))}
 
-          {/* Data rows */}
           {Array.from({ length: matrixSize }, (_, row) => (
             <React.Fragment key={`r${row}`}>
               <div className="link-matrix-cell header">U{row + 1}</div>

@@ -7,11 +7,11 @@ function MiniCameraFeed({ uav, uavIndex, isSelected, isLive, targetUav }) {
   
   const stateColor = (state) => {
     switch(state) {
-      case 'LOCKED': return '#ffffff';
-      case 'TRACKING': return '#00e676';
-      case 'REACQUIRING': return '#b39ddb';
-      case 'ACQUIRING': return '#ffb300';
-      default: return '#ff3333';
+      case 'LOCKED': return '#c87832';
+      case 'TRACKING': return '#4ca854';
+      case 'REACQUIRING': return '#8a7aaa';
+      case 'ACQUIRING': return '#c89832';
+      default: return '#c43a3a';
     }
   };
 
@@ -67,8 +67,8 @@ export default function CameraFeedsRow() {
   
   return (
     <div className="camera-feeds-row">
-      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase', flexShrink: 0 }}>
-        Camera Feeds (AI Detection + Tracking)
+      <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase', flexShrink: 0, letterSpacing: '0.6px' }}>
+        Vision Feeds
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minHeight: 0 }}>
         {/* All Feeds (Horizontal Strip) */}

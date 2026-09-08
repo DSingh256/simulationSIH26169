@@ -15,11 +15,11 @@ export default function UAVNode({ uav, isActive }) {
 
   const stateColor = useMemo(() => {
     switch(uav.trackingState) {
-      case 'LOCKED': return new THREE.Color('#ffffff');
-      case 'TRACKING': return new THREE.Color('#00e676');
-      case 'REACQUIRING': return new THREE.Color('#b39ddb');
-      case 'ACQUIRING': return new THREE.Color('#ffb300');
-      default: return new THREE.Color('#ff3333');
+      case 'LOCKED': return new THREE.Color('#c87832');
+      case 'TRACKING': return new THREE.Color('#4ca854');
+      case 'REACQUIRING': return new THREE.Color('#8a7aaa');
+      case 'ACQUIRING': return new THREE.Color('#c89832');
+      default: return new THREE.Color('#c43a3a');
     }
   }, [uav.trackingState]);
   

@@ -6,7 +6,7 @@ export default function PATpipeline() {
   
   return (
     <div>
-      <div className="panel-title">PAT Pipeline <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>(UAV-1)</span></div>
+      <div className="panel-title">Pipeline <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>UAV-1</span></div>
       
       <div style={{ marginTop: '10px' }}>
         <div className="pipeline-step">
