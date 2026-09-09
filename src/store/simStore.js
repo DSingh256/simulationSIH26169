@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getSimRNG, resetSimRNG } from '../sim/seededRandom';
 
 export const TrackingState = {
   SEARCHING: 'SEARCHING',
@@ -7,6 +8,56 @@ export const TrackingState = {
   LOCKED: 'LOCKED',
   ACQUIRING: 'ACQUIRING',
 };
+
+// ─── Part 4: Terminal Phase Enum ───
+export const TerminalPhase = {
+  DEPLOYED: 'DEPLOYED',
+  SEARCHING: 'SEARCHING',
+  LINK_ESTABLISHING: 'LINK_ESTABLISHING',
+  COARSE_TRACK: 'COARSE_TRACK',
+  REACQUIRE: 'REACQUIRE',
+};
+
+// ─── Part 4: Scenario Labels ───
+export const ScenarioLabel = {
+  BASELINE: 'baseline',
+  TURBULENCE: 'turbulence',
+  OCCLUSION: 'occlusion',
+  SUN_GLINT: 'sun-glint',
+  DROPOUT: 'dropout',
+  COMBINED: 'combined',
+};
+
+// ─── Part 4: Detector Modes ───
+export const DetectorMode = {
+  BLOB_ONLY: 'blob_only',
+  BLOB_CNN: 'blob+CNN',
+};
+
+function createTerminalState(id) {
+  return {
+    id,
+    phase: TerminalPhase.DEPLOYED,
+    confirmedLock: false,
+    searchStartTime: 0,
+    searchProgress: 0,
+    searchYaw: 0,
+    searchPitch: 0,
+    gimbalYaw: 0,
+    gimbalPitch: 0,
+    detectionResult: null,
+    rawCandidateCount: 0,
+    confirmedCandidateCount: 0,
+    rejectedCandidateCount: 0,
+    cnnConfidence: 0,
+    trackingErrors: [],
+    reacquireCount: 0,
+    reacquireTimes: [],
+    reacquireStartT: 0,
+    lockStartT: 0,
+    consecutiveLockFrames: 0,
+  };
+}
 
 // ─── Waypoint generation respects altitude ───
 function generateWaypoint(altitude = 1000, scenario = 'MULTI_UAV_MESH', trajectoryType = 'MIXED', index = 0) {
@@ -250,7 +301,7 @@ export const useSimStore = create((set, get) => ({
   simPaused: false,
   simSpeed: 1.0,
   simTime: 0,
-  simSeed: 42,
+  simSeed: 26169,
 
   // ─── Environment profile (computed) ───
   envProfile: ENV_PROFILES['CLOUDY_DYNAMIC'],
@@ -297,6 +348,62 @@ export const useSimStore = create((set, get) => ({
   occlusionActive: false,
   lowLightActive: false,
   signalDropoutActive: false,
+
+  // ═══════════════════════════════════════════════
+  // ═══ PART 4: Dual-Terminal Link Establishment ══
+  // ═══════════════════════════════════════════════
+
+  // ─── Part 4 Config ───
+  p4Scenario: ScenarioLabel.BASELINE,
+  detectorMode: DetectorMode.BLOB_CNN,
+  searchPattern: 'raster',
+  minSeparation: 800,
+  searchSpeed: 0.15,
+  linkDwellSeconds: 2.0,
+  cnnConfidenceThreshold: 0.5,
+  lockHoldSeconds: 1.0,
+
+  // ─── Part 4 Disturbance Severity ───
+  turbulenceSeverity: 0.5,
+  occlusionSeverity: 0.5,
+  sunGlintSeverity: 0.5,
+  dropoutSeverity: 0.5,
+
+  // ─── Part 4 Terminal State ───
+  terminals: {
+    A: createTerminalState('A'),
+    B: createTerminalState('B'),
+  },
+
+  // ─── Part 4 Link State ───
+  linkEstablished: false,
+  linkEstablishedT: null,
+  beamVisible: false,
+  dualLockSince: null,
+  deployT: 0,
+
+  // ─── Part 4 Live Metrics ───
+  p4Metrics: {
+    acquisitionTime: null,
+    trackingRMSE: 0,
+    falsePositiveRate: 0,
+    lockProbability: null,
+    reactionLatency: 0,
+    coarseTrackDuration: 0,
+    coarseTrackStartT: null,
+    disturbanceEventCount: 0,
+    totalRawCandidates: 0,
+    totalRejectedCandidates: 0,
+    trackingSamples: [],
+  },
+
+  // ─── Part 4 Disturbance Events Log ───
+  disturbanceEvents: [],
+
+  // ─── Part 4 Run State ───
+  p4RunActive: false,
+  p4RunId: null,
+  performanceLogOpen: false,
 
   // ─── Metrics ───
   metricsViewActive: false,
@@ -651,4 +758,176 @@ export const useSimStore = create((set, get) => ({
     trackingHistory: [],
     eventLog: createInitialLog(),
   })),
+
+  // ═══════════════════════════════════════
+  // ═══ PART 4 ACTIONS ═══════════════════
+  // ═══════════════════════════════════════
+
+  setP4Scenario: (s) => set({ p4Scenario: s }),
+  setDetectorMode: (m) => set({ detectorMode: m }),
+  setSearchPattern: (p) => set({ searchPattern: p }),
+  setLinkDwellSeconds: (v) => set({ linkDwellSeconds: v }),
+  setTurbulenceSeverity: (v) => set({ turbulenceSeverity: v }),
+  setOcclusionSeverity: (v) => set({ occlusionSeverity: v }),
+  setSunGlintSeverity: (v) => set({ sunGlintSeverity: v }),
+  setDropoutSeverity: (v) => set({ dropoutSeverity: v }),
+  setPerformanceLogOpen: (v) => set({ performanceLogOpen: v }),
+
+  updateTerminal: (id, data) => set(state => ({
+    terminals: {
+      ...state.terminals,
+      [id]: { ...state.terminals[id], ...data },
+    },
+  })),
+
+  updateP4Metrics: (data) => set(state => ({
+    p4Metrics: { ...state.p4Metrics, ...data },
+  })),
+
+  addDisturbanceEvent: (evt) => set(state => ({
+    disturbanceEvents: [...state.disturbanceEvents, evt],
+    p4Metrics: {
+      ...state.p4Metrics,
+      disturbanceEventCount: state.p4Metrics.disturbanceEventCount + 1,
+    },
+  })),
+
+  setLinkEstablished: (t) => set(state => {
+    const acqTime = t - state.deployT;
+    return {
+      linkEstablished: true,
+      linkEstablishedT: t,
+      beamVisible: true,
+      p4Metrics: {
+        ...state.p4Metrics,
+        acquisitionTime: acqTime,
+        coarseTrackStartT: t,
+      },
+    };
+  }),
+
+  setBeamVisible: (v) => set({ beamVisible: v }),
+  setDualLockSince: (t) => set({ dualLockSince: t }),
+
+  /** Part 4 Reset — spawns terminals at seeded positions, clears run state */
+  resetPart4: (scenario, detectorMode, seed) => {
+    const rng = resetSimRNG(seed || 26169);
+    const minSep = get().minSeparation;
+
+    // Deterministic terminal positions with enforced min separation
+    let ax, az, bx, bz;
+    let attempts = 0;
+    do {
+      ax = rng.range(-1200, 1200);
+      az = rng.range(-1200, 1200);
+      bx = rng.range(-1200, 1200);
+      bz = rng.range(-1200, 1200);
+      attempts++;
+    } while (
+      Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2) < minSep && attempts < 100
+    );
+
+    const alt = get().globalAltitude || 1000;
+
+    // Update UAV positions — UAV-1 = Terminal A, UAV-2 = Terminal B
+    const uavs = get().uavs.map((u, i) => {
+      if (i === 0) return { ...u, position: [ax, alt, az], trackingState: 'SEARCHING' };
+      if (i === 1) return { ...u, position: [bx, alt, bz], trackingState: 'SEARCHING' };
+      return u;
+    });
+
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    set({
+      simTime: 0,
+      simRunning: true,
+      simPaused: false,
+      simSeed: seed || 26169,
+      p4Scenario: scenario || ScenarioLabel.BASELINE,
+      detectorMode: detectorMode || DetectorMode.BLOB_CNN,
+      uavs,
+      terminals: {
+        A: createTerminalState('A'),
+        B: createTerminalState('B'),
+      },
+      linkEstablished: false,
+      linkEstablishedT: null,
+      beamVisible: false,
+      dualLockSince: null,
+      deployT: 0,
+      p4Metrics: {
+        acquisitionTime: null,
+        trackingRMSE: 0,
+        falsePositiveRate: 0,
+        lockProbability: null,
+        reactionLatency: 0,
+        coarseTrackDuration: 0,
+        coarseTrackStartT: null,
+        disturbanceEventCount: 0,
+        totalRawCandidates: 0,
+        totalRejectedCandidates: 0,
+        trackingSamples: [],
+      },
+      disturbanceEvents: [],
+      p4RunActive: true,
+      p4RunId: `run-${Date.now()}-${Math.floor(rng.next() * 10000)}`,
+      trackingHistory: [],
+      eventLog: [
+        { time: t, message: `Part 4 reset — scenario: ${scenario || 'baseline'}, mode: ${detectorMode || 'blob+CNN'}, seed: ${seed || 26169}` },
+        { time: t, message: 'Terminals A & B deployed' },
+      ],
+    });
+  },
+
+  /** Finish the current Part 4 run — returns the performance row */
+  finishP4Run: () => {
+    const state = get();
+    if (!state.p4RunActive) return null;
+
+    const metrics = state.p4Metrics;
+    const samples = metrics.trackingSamples;
+    const rmse = samples.length > 0
+      ? Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length)
+      : 0;
+
+    const fpr = metrics.totalRawCandidates > 0
+      ? metrics.totalRejectedCandidates / metrics.totalRawCandidates
+      : 0;
+
+    const coarseDur = metrics.coarseTrackStartT !== null
+      ? state.simTime - metrics.coarseTrackStartT
+      : 0;
+
+    const termA = state.terminals.A;
+    const termB = state.terminals.B;
+    const totalReacq = termA.reacquireCount + termB.reacquireCount;
+    const allReacqTimes = [...termA.reacquireTimes, ...termB.reacquireTimes];
+    const meanReacqTime = allReacqTimes.length > 0
+      ? allReacqTimes.reduce((a, b) => a + b, 0) / allReacqTimes.length
+      : 0;
+
+    const row = {
+      run_id: state.p4RunId,
+      timestamp: new Date().toISOString(),
+      scenario: state.p4Scenario,
+      detector_mode: state.detectorMode,
+      acquisition_time: metrics.acquisitionTime !== null ? +metrics.acquisitionTime.toFixed(3) : null,
+      tracking_RMSE: +rmse.toFixed(4),
+      false_positive_rate: +fpr.toFixed(4),
+      lock_probability: metrics.lockProbability,
+      reacquire_count: totalReacq,
+      mean_reacquire_time: +meanReacqTime.toFixed(3),
+      disturbance_events: metrics.disturbanceEventCount,
+    };
+
+    set({
+      p4RunActive: false,
+      p4Metrics: { ...metrics, coarseTrackDuration: coarseDur },
+    });
+
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    get().addEvent(`Run finished: ${state.p4RunId}`);
+
+    return row;
+  },
 }));

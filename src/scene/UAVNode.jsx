@@ -19,6 +19,11 @@ export default function UAVNode({ uav, isActive }) {
       case 'TRACKING': return new THREE.Color('#4ca854');
       case 'REACQUIRING': return new THREE.Color('#8a7aaa');
       case 'ACQUIRING': return new THREE.Color('#c89832');
+      // Part 4 terminal phase colors
+      case 'DEPLOYED': return new THREE.Color('#7E8B93');
+      case 'LINK_ESTABLISHING': return new THREE.Color('#e8a832');
+      case 'COARSE_TRACK': return new THREE.Color('#00e676');
+      case 'REACQUIRE': return new THREE.Color('#8a7aaa');
       default: return new THREE.Color('#c43a3a');
     }
   }, [uav.trackingState]);

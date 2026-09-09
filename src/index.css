@@ -1271,3 +1271,195 @@ html {
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* ═══════════════════════════════════════════
+   PART 4: DUAL TERMINAL & PERFORMANCE LOG
+   ═══════════════════════════════════════════ */
+
+.p4-dual-terminal-container {
+  display: flex;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  position: relative;
+  min-height: 400px;
+}
+.p4-empty {
+  align-items: center;
+  justify-content: center;
+}
+.p4-empty-label {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.p4-terminal-view {
+  flex: 1;
+  position: relative;
+  border-right: 1px solid var(--border-subtle);
+}
+.p4-terminal-view:last-child {
+  border-right: none;
+}
+.p4-terminal-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: 'JetBrains Mono', monospace;
+  z-index: 10;
+}
+.p4-terminal-id {
+  font-weight: 700;
+  font-size: 11px;
+  color: #fff;
+}
+.p4-phase-badge {
+  font-size: 9px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  border: 1px solid;
+  font-weight: 600;
+}
+.p4-terminal-hud-tr {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+  pointer-events: none;
+}
+.p4-terminal-hud-bl {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.p4-link-established-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 230, 118, 0.15);
+  border: 1px solid #00e676;
+  color: #00e676;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  backdrop-filter: blur(4px);
+  z-index: 20;
+  box-shadow: 0 0 20px rgba(0, 230, 118, 0.2);
+}
+.p4-link-dwell-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(232, 168, 50, 0.15);
+  border: 1px solid #e8a832;
+  color: #e8a832;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  backdrop-filter: blur(4px);
+  z-index: 20;
+}
+.p4-link-beam-icon {
+  font-size: 20px;
+}
+
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 0 0px rgba(inherit, 0.4); }
+  100% { box-shadow: 0 0 0 4px rgba(inherit, 0); }
+}
+.pulse {
+  animation: pulse-border 1.5s infinite;
+}
+
+/* Performance Log Modal */
+.p4-perf-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.p4-perf-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 95vw;
+  max-width: 1200px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.p4-perf-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.p4-perf-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-bright);
+}
+.p4-perf-table-container {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+.p4-perf-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+.p4-perf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+.p4-perf-table th {
+  text-align: left;
+  padding: 8px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+}
+.p4-perf-table td {
+  padding: 8px;
+  color: var(--text-bright);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.p4-perf-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}

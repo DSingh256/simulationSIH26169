@@ -16,7 +16,8 @@ import StateEstimatorPanel from './dashboard/StateEstimatorPanel';
 import TelemetryExport from './dashboard/TelemetryExport';
 import FSOCTrackingView from './dashboard/FSOCTrackingView';
 import PipelineDiagram from './dashboard/PipelineDiagram';
-
+import DualTerminalView from './dashboard/DualTerminalView';
+import PerformanceLog from './dashboard/PerformanceLog';
 
 import CameraRig from './scene/CameraRig';
 import MissionWorld from './scene/MissionWorld';
@@ -154,7 +155,7 @@ function App() {
           </div>
         </div>
         <div className="perception-grid">
-          <FSOCTrackingView />
+          {store.p4RunActive ? <DualTerminalView /> : <FSOCTrackingView />}
           <PipelineDiagram />
           <HybridFusionPanel />
           <StateEstimatorPanel />
@@ -209,6 +210,8 @@ function App() {
         {showControls ? '✕' : '⚙'}
       </button>
       {showControls && <ControlsPanel />}
+
+      <PerformanceLog />
     </div>
   );
 }

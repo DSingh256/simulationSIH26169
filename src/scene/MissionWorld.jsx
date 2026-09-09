@@ -4,7 +4,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import { Line, Text, Sky, Billboard, Sparkles } from '@react-three/drei';
 import * as THREE from 'three';
 import UAVNode from './UAVNode';
-
+import { tickTerminalSimulation } from '../sim/terminalSimulation';
 // Textured Building component
 function CityBuilding({ building, buildingTexture }) {
   const { x, z, width, depth, height } = building;
@@ -140,6 +140,11 @@ export default function MissionWorld() {
     
     // Update link line-of-sight occlusion
     store.updateLinksLOS();
+
+    // ── Part 4: Tick dual-terminal simulation ──
+    if (store.p4RunActive) {
+      tickTerminalSimulation(store, dt);
+    }
   });
 
   return (
@@ -293,6 +298,16 @@ export default function MissionWorld() {
           />
         );
       })}
+      {/* Part 4: Beam line between Terminal A and B when link is established */}
+      {store.beamVisible && uavs.length >= 2 && (
+        <Line
+          points={[uavs[0].position, uavs[1].position]}
+          color="#00ff88"
+          lineWidth={4}
+          transparent
+          opacity={0.9}
+        />
+      )}
     </>
   );
 }
