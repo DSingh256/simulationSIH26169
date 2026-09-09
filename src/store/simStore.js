@@ -3,6 +3,7 @@ import {
   ENV_PRESETS,
   opticalAttenuation,
   createLinksForScenario,
+  resetLinksToSearch,
   layoutPositions,
   linkBudget,
 } from '../sim/simConfig';
@@ -43,13 +44,13 @@ function createUAV(id, idx, opts = {}) {
     speed,
     heading: Math.atan2(pos[2], pos[0]) + Math.PI / 2,
     orbitRadius: Math.hypot(pos[0], pos[2]) || 900,
-    trackingState: ['TRACKING', 'LOCKED', 'ACQUIRING', 'TRACKING', 'LOCKED', 'TRACKING'][idx % 6],
+    trackingState: 'SEARCHING',
     links: 0,
     battery: 60 + Math.floor(Math.random() * 30),
     linkMode: 'Auto',
     cameraFOV: 16.0,
     fps: 115 + Math.floor(Math.random() * 10),
-    confidence: 0.9 + Math.random() * 0.08,
+    confidence: 0.12,
     pointingError: Math.random() * 2.5,
     detectionBox: null,
     waypointQueue: queue,
@@ -71,10 +72,42 @@ function createFleet(numUAVs, scenario, altitude, speed, trajectoryType) {
 function withLinkCounts(uavs, links, numUAVs) {
   const counts = Array(numUAVs).fill(0);
   links.forEach((l) => {
+    if (l.state !== 'LOCKED' && l.state !== 'TRACKING') return;
     if (l.from < numUAVs) counts[l.from]++;
     if (l.to < numUAVs) counts[l.to]++;
   });
   return uavs.map((u, i) => (i < numUAVs ? { ...u, links: counts[i] } : u));
+}
+
+function emptyTrial() {
+  return {
+    samples: 0,
+    lockedSamples: 0,
+    errorSumSq: 0,
+    firstLockTime: null,
+    duration: 0,
+    rmsUrad: 0,
+    lockRetention: 0,
+    maxError: 0,
+    decoysRejected: 0,
+    fpsSum: 0,
+  };
+}
+
+function trialSnapshot(state) {
+  const t = state.trial || emptyTrial();
+  return {
+    duration: t.duration,
+    firstLockTime: t.firstLockTime,
+    rmsUrad: t.rmsUrad,
+    lockRetention: t.lockRetention,
+    maxError: t.maxError,
+    decoysRejected: t.decoysRejected,
+    fps: t.samples > 0 ? Math.round(t.fpsSum / t.samples) : 0,
+    environment: state.environment,
+    scenario: state.scenario,
+    time: new Date().toISOString(),
+  };
 }
 
 function stamp(message, log) {
@@ -125,18 +158,18 @@ function createInitialLog() {
   const fmt = (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const entries = [];
   const messages = [
-    'Simulation started',
-    'UAV-1 initialized',
-    'UAV-2 initialized',
-    'UAV-3 initialized',
-    'UAV-4 initialized',
-    'UAV-5 initialized',
-    'UAV-6 initialized',
-    'Link established: UAV-1 ↔ UAV-2',
-    'UAV-3 detected by FOV',
-    'Coarse tracking engaged: UAV-3',
-    'Turbulence intensity: 0.5',
-    'Tracking originated: UAV-3',
+    'Nodes powered — no optical links',
+    'UAV-1 SEARCHING',
+    'UAV-2 SEARCHING',
+    'UAV-3 SEARCHING',
+    'UAV-4 SEARCHING',
+    'UAV-5 SEARCHING',
+    'UAV-6 SEARCHING',
+    'Mesh idle — awaiting beacon acquisition',
+    'Coarse PAT scan started',
+    'Decoy rejection enabled',
+    'Waiting for first FOV lock',
+    'No links established',
   ];
   for (let i = 0; i < messages.length; i++) {
     const t = new Date(now.getTime() - (messages.length - i) * 3000);
@@ -204,17 +237,22 @@ export const useSimStore = create((set, get) => ({
 
   selectedLink: 0,
 
-  trackingState: TrackingState.TRACKING,
+  trackingState: TrackingState.SEARCHING,
   pointingError: { x: 0, y: 0 },
   cameraCorrection: { x: 0, y: 0 },
   detectionBox: null,
   detectionConfidence: 0,
   targetPosition: [0, 0, -1000],
 
-  sunGlintActive: false,
+  sunGlintActive: true,
   occlusionActive: false,
   lowLightActive: false,
   signalDropoutActive: false,
+
+  trial: emptyTrial(),
+  trialCard: null,
+  showTrialCard: false,
+  acquisitionBannerUntil: 0,
 
   metricsViewActive: false,
 
@@ -275,8 +313,72 @@ export const useSimStore = create((set, get) => ({
     if (!state.simRunning) return { simRunning: true, simPaused: false };
     return { simPaused: !state.simPaused };
   }),
-  stopSim: () => set({ simRunning: false, simPaused: false }),
-  startSim: () => set({ simRunning: true, simPaused: false }),
+  stopSim: () => set((state) => ({
+    simRunning: false,
+    simPaused: false,
+    trialCard: trialSnapshot({ ...state, trial: { ...state.trial, duration: state.simTime } }),
+    showTrialCard: true,
+    eventLog: stamp('Trial stopped — performance card ready', state.eventLog),
+  })),
+  startSim: () => set((state) => ({
+    simRunning: true,
+    simPaused: false,
+    simTime: 0,
+    trial: emptyTrial(),
+    trialCard: null,
+    showTrialCard: false,
+    acquisitionBannerUntil: 0,
+    cameraCorrection: { x: 0.45, y: -0.22 },
+    trackingHistory: [],
+    links: resetLinksToSearch(state.links),
+    uavs: state.uavs.map((u) => ({
+      ...u,
+      trackingState: 'SEARCHING',
+      consecutiveLockFrames: 0,
+      confidence: 0.12,
+      detectionBox: null,
+      links: 0,
+    })),
+    eventLog: stamp('Acquisition started — nodes searching, mesh idle', state.eventLog),
+  })),
+  dismissTrialCard: () => set({ showTrialCard: false }),
+  noteAcquisition: () => set((state) => {
+    if (state.trial.firstLockTime != null) return {};
+    return {
+      trial: { ...state.trial, firstLockTime: state.simTime },
+      acquisitionBannerUntil: state.simTime + 2.8,
+      eventLog: stamp('ACQUIRED — beacon in FOV, coarse lock', state.eventLog),
+    };
+  }),
+  incrementDecoysRejected: (n = 1) => set((state) => ({
+    trial: { ...state.trial, decoysRejected: (state.trial.decoysRejected || 0) + n },
+  })),
+  exportTrialCard: () => {
+    const state = get();
+    const card = state.trialCard || trialSnapshot(state);
+    const tta = card.firstLockTime == null ? 'N/A' : `${card.firstLockTime.toFixed(2)} s`;
+    const text = [
+      'VirtuPAT Coarse Alignment — Trial Card',
+      `Time: ${card.time}`,
+      `Environment: ${card.environment}`,
+      `Scenario: ${card.scenario}`,
+      `Trial duration: ${card.duration.toFixed(2)} s`,
+      `Time to first lock: ${tta}`,
+      `RMS pointing error: ${card.rmsUrad.toFixed(2)} µrad`,
+      `Lock retention: ${card.lockRetention.toFixed(1)} %`,
+      `Max tracking error: ${card.maxError.toFixed(2)} µrad`,
+      `Decoys rejected: ${card.decoysRejected}`,
+      `Average FPS: ${card.fps}`,
+      'ISRO SIH26169',
+    ].join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `virtupat-trial-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   setSimSpeed: (s) => set({ simSpeed: s }),
   setSimTime: (t) => set({ simTime: t }),
 
@@ -330,8 +432,26 @@ export const useSimStore = create((set, get) => ({
   }),
   setTrackingState: (uavIndex, stateVal) => set((state) => {
     const uavs = [...state.uavs];
+    const prev = uavs[uavIndex]?.trackingState;
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], trackingState: stateVal };
-    return { trackingState: stateVal, uavs };
+    const acquired = (prev === 'SEARCHING' || prev === 'REACQUIRING') && (stateVal === 'TRACKING' || stateVal === 'LOCKED');
+    let links = state.links;
+    if (acquired) {
+      let promoted = false;
+      links = state.links.map((l) => {
+        if (!promoted && l.from === uavIndex && l.state === 'SEARCHING') {
+          promoted = true;
+          return { ...l, state: 'ACQUIRING', confidence: 0.4, discoverDelay: 0 };
+        }
+        return l;
+      });
+    }
+    const trial = acquired && state.trial.firstLockTime == null
+      ? { ...state.trial, firstLockTime: state.simTime }
+      : state.trial;
+    const banner = acquired ? state.simTime + 2.8 : state.acquisitionBannerUntil;
+    const eventLog = acquired ? stamp('ACQUIRED — beacon in FOV, coarse lock', state.eventLog) : state.eventLog;
+    return { trackingState: stateVal, uavs, links, trial, acquisitionBannerUntil: banner, eventLog };
   }),
   setMotionOverrideActive: (idx, active) => set((state) => {
     const uavs = [...state.uavs];
@@ -553,23 +673,37 @@ export const useSimStore = create((set, get) => ({
         predictedError: basePointing * 0.78,
         receivedPower: budget.receivedPower,
         linkMargin: budget.linkMargin,
+        losClear: !occluded,
       };
 
-      if (occluded && link.losClear) {
-        next = { ...next, losClear: false, state: 'LOST', confidence: 0 };
-        logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} LOST — obstruction`);
-      } else if (!occluded && !link.losClear) {
-        next = { ...next, losClear: true, state: 'ACQUIRING', confidence: 0.3 };
-        logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} re-acquiring — LOS clear`);
-      } else if (!occluded && link.state === 'ACQUIRING') {
-        const newConf = link.confidence + 0.35 * dt;
+      const delay = link.discoverDelay ?? 1;
+      const st = link.state || 'SEARCHING';
+
+      if (occluded) {
+        if (st === 'LOCKED' || st === 'TRACKING' || st === 'ACQUIRING') {
+          next = { ...next, state: 'LOST', confidence: 0, receivedPower: -48, linkMargin: 0 };
+          logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} LOST — obstruction`);
+        } else {
+          next = { ...next, state: 'SEARCHING', confidence: 0, receivedPower: -48, linkMargin: 0 };
+        }
+      } else if (st === 'SEARCHING') {
+        next = { ...next, receivedPower: -45, linkMargin: 0, angularError: 6.5, confidence: 0 };
+        if (simTime >= delay) {
+          next = { ...next, state: 'ACQUIRING', confidence: 0.22 };
+          logEntries.push(`UAV-${link.from + 1} detected UAV-${link.to + 1} — acquiring`);
+        }
+      } else if (st === 'LOST') {
+        next = { ...next, state: 'ACQUIRING', confidence: 0.25 };
+        logEntries.push(`UAV-${link.from + 1} re-acquiring UAV-${link.to + 1}`);
+      } else if (st === 'ACQUIRING') {
+        const newConf = (link.confidence || 0) + 0.42 * dt;
         if (newConf >= 0.9) {
           next = { ...next, state: 'LOCKED', confidence: 0.95 };
-          logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} LOCKED`);
+          logEntries.push(`Mesh link up: UAV-${link.from + 1} ↔ UAV-${link.to + 1}`);
         } else {
-          next = { ...next, confidence: newConf };
+          next = { ...next, state: 'ACQUIRING', confidence: newConf };
         }
-      } else if (!occluded && (link.state === 'LOCKED' || link.state === 'TRACKING')) {
+      } else if (st === 'LOCKED' || st === 'TRACKING') {
         if (budget.linkMargin < 1.5) {
           next = { ...next, state: 'ACQUIRING', confidence: Math.max(0.35, link.confidence - 0.2) };
           logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} fading — low margin`);
@@ -578,10 +712,22 @@ export const useSimStore = create((set, get) => ({
         }
       }
 
-      avgErr += next.angularError;
+      avgErr += next.state === 'LOCKED' ? next.angularError : 6;
       maxErr = Math.max(maxErr, next.angularError);
       if (next.state === 'LOCKED') locked++;
       newLinks[i] = next;
+    }
+
+    for (let i = 0; i < numUAVs; i++) {
+      const mine = newLinks.filter((l) => l.from === i || l.to === i);
+      let ts = 'SEARCHING';
+      if (mine.some((l) => l.state === 'LOCKED')) ts = 'LOCKED';
+      else if (mine.some((l) => l.state === 'TRACKING')) ts = 'TRACKING';
+      else if (mine.some((l) => l.state === 'ACQUIRING')) ts = 'ACQUIRING';
+      else if (mine.some((l) => l.state === 'LOST')) ts = 'REACQUIRING';
+      const best = mine.reduce((m, l) => Math.max(m, l.confidence || 0), 0);
+      uavs[i].trackingState = ts;
+      uavs[i].confidence = ts === 'SEARCHING' ? 0.12 : Math.max(0.2, best);
     }
 
     const linkN = Math.max(newLinks.length, 1);
@@ -605,18 +751,31 @@ export const useSimStore = create((set, get) => ({
       motionPrediction: 0.25 + Math.random() * 0.12,
       pointingControl: 0.45 + Math.random() * 0.2 + (disturbances.platformVibration ? 0.25 : 0),
       cameraActuation: 0.5 + Math.random() * 0.2 + (disturbances.cameraMotion ? 0.2 : 0),
-      coarseAlignment: occlusionActive ? 'Hold' : 'Ready',
-      fineAlignment: newLinks[0]?.state === 'LOCKED' ? 'Locked' : 'Seek',
+      coarseAlignment: locked > 0 ? 'Aligning' : 'Search',
+      fineAlignment: locked === linkN ? 'Mesh locked' : `${locked}/${newLinks.length} up`,
     };
 
-    const lockRetention = (locked / linkN) * 100;
+    const prevTrial = state.trial || emptyTrial();
+    const trial = {
+      ...prevTrial,
+      samples: prevTrial.samples + 1,
+      lockedSamples: prevTrial.lockedSamples + locked / linkN,
+      errorSumSq: prevTrial.errorSumSq + avgErr * avgErr,
+      maxError: Math.max(prevTrial.maxError, avgErr),
+      duration: simTime,
+      fpsSum: prevTrial.fpsSum + Math.round(1 / Math.max(rawDelta, 1 / 120)),
+      firstLockTime: prevTrial.firstLockTime == null && locked > 0 ? simTime : prevTrial.firstLockTime,
+    };
+    trial.rmsUrad = trial.samples > 0 ? Math.sqrt(trial.errorSumSq / trial.samples) : 0;
+    trial.lockRetention = trial.samples > 0 ? (trial.lockedSamples / trial.samples) * 100 : 0;
+
     const sysPerf = {
       fps: Math.round(1 / Math.max(rawDelta, 1 / 120)),
-      acqTime: +(0.28 + (weatherOn ? 0.18 : 0) + (occlusionActive ? 0.22 : 0)).toFixed(2),
+      acqTime: trial.firstLockTime == null ? 0 : +trial.firstLockTime.toFixed(2),
       reacqTime: +(0.4 + (weatherOn ? 0.25 : 0) + atten * 0.04).toFixed(2),
       avgTrackError: +avgErr.toFixed(2),
       maxTrackError: +maxErr.toFixed(2),
-      lockRetention: +lockRetention.toFixed(1),
+      lockRetention: +trial.lockRetention.toFixed(1),
       falseDetection: +(0.4 + (disturbances.imageNoise ? 0.5 : 0) + (weatherOn ? 0.4 : 0)).toFixed(1),
       inferenceTime: +(1.1 + Math.random() * 0.4).toFixed(1),
       controlLoop: +(7.6 + (disturbances.platformVibration ? 1.4 : 0) + state.simSpeed * 0.2).toFixed(1),
@@ -637,6 +796,7 @@ export const useSimStore = create((set, get) => ({
       occlusionTimer,
       patLatencies,
       sysPerf,
+      trial,
       eventLog,
     };
   }),
@@ -651,8 +811,12 @@ export const useSimStore = create((set, get) => ({
       trackingHistory: [],
       occlusionActive: false,
       occlusionTimer: 0,
-      cameraCorrection: { x: 0, y: 0 },
+      cameraCorrection: { x: 0.45, y: -0.22 },
       pointingError: { x: 0, y: 0 },
+      trial: emptyTrial(),
+      trialCard: null,
+      showTrialCard: false,
+      acquisitionBannerUntil: 0,
       opticalAttenuationDbKm: opticalAttenuation(state.environment, state.disturbances.weatherEffects),
       eventLog: stamp('Simulation reset', createInitialLog()),
     };

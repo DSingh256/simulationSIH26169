@@ -5,7 +5,7 @@ import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-thr
 import * as THREE from 'three';
 
 import { useSimStore } from '../store/simStore';
-import { ENV_PRESETS } from '../sim/simConfig';
+import { ENV_PRESETS, decoyWorldPositions } from '../sim/simConfig';
 import { TurbulenceEffect } from '../scene/TurbulenceEffect';
 import { SensorNoiseEffect } from '../scene/SensorNoiseEffect';
 import TrackerController from '../sim/TrackerController';
@@ -17,16 +17,29 @@ const _src = new THREE.Vector3();
 const _tgt = new THREE.Vector3();
 const _proj = new THREE.Vector3();
 
-function TrackingCameraRig({ sourcePos, targetPos }) {
+function TrackingCameraRig({ sourcePos, targetPos, trackingState }) {
   const cameraRef = useRef();
   const fov = useSimStore((state) => state.fov);
   const cameraCorrection = useSimStore((state) => state.cameraCorrection);
 
   useFrame(({ clock }) => {
     if (!cameraRef.current) return;
-    const { disturbances, simRunning, simPaused, simSpeed, occlusionActive } = useSimStore.getState();
+    const { disturbances, simRunning, simPaused, simSpeed, occlusionActive, simTime } = useSimStore.getState();
     _src.set(...sourcePos);
     _tgt.set(...targetPos);
+
+    const searching = trackingState === 'SEARCHING' || trackingState === 'REACQUIRING';
+    if (searching) {
+      const t = simTime;
+      const R = 280 + 380 * (0.5 + 0.5 * Math.cos(t * 0.55));
+      const angle = t * 1.85;
+      _tgt.set(
+        targetPos[0] + Math.cos(angle) * R,
+        targetPos[1] + Math.sin(t * 1.1) * 70,
+        targetPos[2] + Math.sin(angle) * R
+      );
+    }
+
     _look.copy(_tgt).sub(_src);
     if (_look.lengthSq() < 1e-4) _look.set(0, 0, -1);
     else _look.normalize();
@@ -64,24 +77,43 @@ function TrackingCameraRig({ sourcePos, targetPos }) {
   );
 }
 
-function TargetProjector({ targetPos, linkUp, hudRef }) {
+function MarkerProjector({ targetPos, decoys, trackingState, linkUp, hudRef, decoyRefs }) {
   useFrame(({ camera }) => {
     const hud = hudRef.current;
-    if (!hud) return;
     _proj.set(targetPos[0], targetPos[1], targetPos[2]).project(camera);
     const inView = _proj.z < 1 && Math.abs(_proj.x) < 0.98 && Math.abs(_proj.y) < 0.98;
-    const seen = inView && linkUp;
-    if (inView) {
-      hud.style.setProperty('--mx', `${(_proj.x * 0.5 + 0.5) * 100}%`);
-      hud.style.setProperty('--my', `${(-_proj.y * 0.5 + 0.5) * 100}%`);
-    } else {
-      hud.style.setProperty('--mx', '50%');
-      hud.style.setProperty('--my', '50%');
+    const locked = trackingState === 'TRACKING' || trackingState === 'LOCKED';
+    const seen = inView && linkUp && locked;
+    if (hud) {
+      if (inView) {
+        hud.style.setProperty('--mx', `${(_proj.x * 0.5 + 0.5) * 100}%`);
+        hud.style.setProperty('--my', `${(-_proj.y * 0.5 + 0.5) * 100}%`);
+        hud.style.display = 'block';
+      } else {
+        hud.style.setProperty('--mx', '50%');
+        hud.style.setProperty('--my', '50%');
+        hud.style.display = locked ? 'none' : 'block';
+      }
+      const label = hud.querySelector('.lock-label');
+      if (label) {
+        if (trackingState === 'SEARCHING') label.textContent = 'SEARCHING';
+        else if (seen) label.textContent = 'BEACON';
+        else label.textContent = 'CONNECTION BROKEN';
+      }
+      hud.classList.toggle('ok', seen);
+      hud.classList.toggle('lost', !seen);
+      hud.classList.toggle('search', trackingState === 'SEARCHING');
     }
-    const label = hud.querySelector('.lock-label');
-    if (label) label.textContent = seen ? 'CONNECTION FOUND' : 'CONNECTION BROKEN';
-    hud.classList.toggle('ok', seen);
-    hud.classList.toggle('lost', !seen);
+
+    decoys.forEach((d, i) => {
+      const el = decoyRefs.current[i];
+      if (!el) return;
+      _proj.set(d.position[0], d.position[1], d.position[2]).project(camera);
+      const vis = _proj.z < 1 && Math.abs(_proj.x) < 1.05 && Math.abs(_proj.y) < 1.05;
+      el.style.display = vis ? 'block' : 'none';
+      el.style.setProperty('--mx', `${(_proj.x * 0.5 + 0.5) * 100}%`);
+      el.style.setProperty('--my', `${(-_proj.y * 0.5 + 0.5) * 100}%`);
+    });
   });
   return null;
 }
@@ -92,6 +124,7 @@ function LiveScene({ targetUav, buildings }) {
   const weatherOn = useSimStore((s) => s.disturbances.weatherEffects);
   const occlusionActive = useSimStore((s) => s.occlusionActive);
   const env = ENV_PRESETS[environment] || ENV_PRESETS.CLOUDY_DYNAMIC;
+  const decoys = decoyWorldPositions(targetUav.position);
 
   const buildingMat = useMemo(() => {
     const mat = new THREE.MeshStandardMaterial({
@@ -116,24 +149,27 @@ function LiveScene({ targetUav, buildings }) {
         <>
           <UAVNode uav={targetUav} isActive={true} />
           <mesh position={targetUav.position}>
-            <sphereGeometry args={[10, 16, 16]} />
-            <meshBasicMaterial color="#fff" toneMapped={false} />
+            <sphereGeometry args={[12, 16, 16]} />
+            <meshBasicMaterial color="#b8fff0" toneMapped={false} />
           </mesh>
-          <pointLight position={targetUav.position} color="#ffffff" intensity={3} distance={200} />
+          <pointLight position={targetUav.position} color="#ccffee" intensity={4} distance={240} />
         </>
       )}
+
+      {decoys.map((d) => (
+        <group key={d.id} position={d.position}>
+          <mesh>
+            <sphereGeometry args={[14, 16, 16]} />
+            <meshBasicMaterial color={d.color} toneMapped={false} />
+          </mesh>
+          <pointLight color={d.color} intensity={5} distance={220} />
+        </group>
+      ))}
 
       {occlusionActive && (
         <mesh position={[targetUav.position[0] + 8, targetUav.position[1], targetUav.position[2] + 12]}>
           <boxGeometry args={[80, 90, 18]} />
           <meshStandardMaterial color="#111" />
-        </mesh>
-      )}
-
-      {useSimStore.getState().sunGlintActive && (
-        <mesh position={[targetUav.position[0] + 50, targetUav.position[1] - 30, targetUav.position[2]]}>
-          <sphereGeometry args={[10, 16, 16]} />
-          <meshStandardMaterial color="#ffe" emissive="#ffe" emissiveIntensity={4} toneMapped={false} />
         </mesh>
       )}
 
@@ -158,8 +194,14 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex, link })
   const buildings = useSimStore((s) => s.buildings);
   const disturbances = useSimStore((s) => s.disturbances);
   const occlusionActive = useSimStore((s) => s.occlusionActive);
+  const simTime = useSimStore((s) => s.simTime);
+  const bannerUntil = useSimStore((s) => s.acquisitionBannerUntil);
   const hudRef = useRef(null);
-  const linkUp = !!(link && link.losClear && link.state !== 'LOST' && !occlusionActive && !signalDropoutActive);
+  const decoyRefs = useRef([]);
+  const decoys = decoyWorldPositions(targetUav.position);
+  const linkUp = !!(link && (link.state === 'LOCKED' || link.state === 'TRACKING') && !occlusionActive && !signalDropoutActive);
+  const searching = sourceUav.trackingState === 'SEARCHING' || sourceUav.trackingState === 'REACQUIRING';
+  const showAcquired = simTime < bannerUntil && (sourceUav.trackingState === 'TRACKING' || sourceUav.trackingState === 'LOCKED');
 
   return (
     <div style={{
@@ -175,14 +217,21 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex, link })
     >
       <Canvas gl={{ preserveDrawingBuffer: true, antialias: false, alpha: false }}>
         <LiveScene targetUav={targetUav} buildings={buildings} />
-        <TrackingCameraRig sourcePos={sourceUav.position} targetPos={targetUav.position} />
-        <TargetProjector targetPos={targetUav.position} linkUp={linkUp} hudRef={hudRef} />
+        <TrackingCameraRig sourcePos={sourceUav.position} targetPos={targetUav.position} trackingState={sourceUav.trackingState} />
+        <MarkerProjector
+          targetPos={targetUav.position}
+          decoys={decoys}
+          trackingState={sourceUav.trackingState}
+          linkUp={linkUp}
+          hudRef={hudRef}
+          decoyRefs={decoyRefs}
+        />
         <TrackerController uavIndex={uavIndex} targetUav={targetUav} />
 
         <EffectComposer disableNormalPass>
           <TurbulenceEffect />
           <SensorNoiseEffect />
-          <Bloom intensity={1.0} luminanceThreshold={0.5} luminanceSmoothing={0.9} />
+          <Bloom intensity={1.2} luminanceThreshold={0.45} luminanceSmoothing={0.9} />
           <ChromaticAberration offset={disturbances.motionBlur ? [0.0035, 0.0028] : [0.0005, 0.0005]} />
           <Vignette eskil={false} offset={0.1} darkness={0.8} />
         </EffectComposer>
@@ -194,33 +243,30 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex, link })
           <span className="lock-corner bl" />
           <span className="lock-corner br" />
           <span className="lock-dot" />
-          <span className="lock-label">{linkUp ? 'CONNECTION FOUND' : 'CONNECTION BROKEN'}</span>
+          <span className="lock-label">SEARCHING</span>
         </div>
-      </div>
-      {sourceUav.trackingState === 'REACQUIRING' && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '100px',
-          height: '100px',
-          borderRadius: '50%',
-          border: '2px dashed #8a7aaa',
-          animation: 'pulse-reacquire 1.5s infinite linear',
-          pointerEvents: 'none',
-        }}>
-          <div style={{ position: 'absolute', top: '-18px', left: '50%', transform: 'translateX(-50%)', color: '#8a7aaa', fontSize: '9px', whiteSpace: 'nowrap', letterSpacing: '0.5px' }}>
-            SCANNING
+        {decoys.map((d, i) => (
+          <div
+            key={d.id}
+            ref={(el) => { decoyRefs.current[i] = el; }}
+            className="lock-marker decoy"
+          >
+            <span className="lock-corner tl" />
+            <span className="lock-corner tr" />
+            <span className="lock-corner bl" />
+            <span className="lock-corner br" />
+            <span className="lock-label">REJECTED · {d.kind}</span>
           </div>
+        ))}
+      </div>
+      {searching && (
+        <div className="scan-ring">
+          <div className="scan-ring-label">SCANNING FOV</div>
         </div>
       )}
-      <style>{`
-        @keyframes pulse-reacquire {
-          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
-          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
-        }
-      `}</style>
+      {showAcquired && (
+        <div className="acquired-banner">ACQUIRED</div>
+      )}
     </div>
   );
 }

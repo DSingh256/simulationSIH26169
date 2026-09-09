@@ -55,6 +55,7 @@ export default function LinkAnalysis() {
           <span className="label">Link State</span>
           <span>{link.state === 'LOCKED' && <span className="status-badge locked">LOCKED</span>}
           {link.state === 'ACQUIRING' && <span className="status-badge acquiring">ACQUIRING</span>}
+          {link.state === 'SEARCHING' && <span className="status-badge searching">SEARCHING</span>}
           {link.state === 'LOST' && <span className="status-badge searching">LOST</span>}</span>
         </div>
       </div>

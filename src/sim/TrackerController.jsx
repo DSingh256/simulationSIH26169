@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 import { useSimStore } from '../store/simStore';
 import { detectBlob } from './detector';
 import { PIDController } from './pid';
 import { loadCNNClassifier, classifyCandidates } from './cnnClassifier';
+import { decoyWorldPositions } from './simConfig';
 
 export default function TrackerController({ uavIndex = 0, targetUav }) {
   const { gl, size } = useThree();
@@ -99,7 +101,7 @@ export default function TrackerController({ uavIndex = 0, targetUav }) {
             }
           }
         } else if (nextState === 'SEARCHING') {
-          if (confidence > 0.8) {
+          if (confidence > 0.55) {
             nextState = 'TRACKING';
           }
         }
@@ -142,13 +144,39 @@ export default function TrackerController({ uavIndex = 0, targetUav }) {
     
     const candidates = detectBlob(gl, physWidth, physHeight, pixelRatio);
     
-    // CNN Filter
     const validCandidates = await classifyCandidates(candidates, gl, physWidth, physHeight, pixelRatio);
+
+    const peer = targetUav || sim.uavs[sim.links.find((l) => l.from === uavIndex)?.to];
+    let kept = validCandidates;
+    if (peer && state.camera) {
+      const project = (pos) => {
+        const v = new THREE.Vector3(pos[0], pos[1], pos[2]).project(state.camera);
+        return {
+          x: (v.x * 0.5 + 0.5) * size.width,
+          y: (-v.y * 0.5 + 0.5) * size.height,
+        };
+      };
+      const beacon = project(peer.position);
+      const decoys = decoyWorldPositions(peer.position).map((d) => project(d.position));
+      let rejected = 0;
+      kept = validCandidates.filter((c) => {
+        const cx = c.box?.x ?? c.cx ?? 0;
+        const cy = c.box?.y ?? c.cy ?? 0;
+        const dBeacon = Math.hypot(cx - beacon.x, cy - beacon.y);
+        const hitDecoy = decoys.some((d) => Math.hypot(cx - d.x, cy - d.y) < 48);
+        if (hitDecoy && dBeacon > 36) {
+          rejected++;
+          return false;
+        }
+        return true;
+      });
+      if (rejected > 0) sim.incrementDecoysRejected(rejected);
+    }
     
     if (workerRef.current) {
       workerRef.current.postMessage({
         type: 'PROCESS_DETECTION',
-        data: { candidates: validCandidates }
+        data: { candidates: kept }
       });
     }
   });

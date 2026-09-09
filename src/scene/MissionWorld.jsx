@@ -191,6 +191,7 @@ export default function MissionWorld() {
 
       {links.map((link) => {
         if (link.from >= numUAVs || link.to >= numUAVs) return null;
+        if (link.state === 'SEARCHING') return null;
         const pos1 = uavs[link.from]?.position;
         const pos2 = uavs[link.to]?.position;
         if (!pos1 || !pos2) return null;

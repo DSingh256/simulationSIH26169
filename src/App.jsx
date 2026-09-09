@@ -11,6 +11,7 @@ import LinkAnalysis from './dashboard/LinkAnalysis';
 import SystemPerformance from './dashboard/SystemPerformance';
 import EventLog from './dashboard/EventLog';
 import UAVTableSection from './dashboard/UAVTableSection';
+import PatScoreStrip from './dashboard/PatScoreStrip';
 
 import CameraRig from './scene/CameraRig';
 import MissionWorld from './scene/MissionWorld';
@@ -44,6 +45,8 @@ function App() {
           <span>{store.simSpeed.toFixed(1)}x RT</span>
         </div>
       </div>
+
+      <PatScoreStrip />
 
       {/* ═══ HERO ═══ */}
       <div className="hero-section">

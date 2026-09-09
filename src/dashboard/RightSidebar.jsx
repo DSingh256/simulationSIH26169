@@ -79,19 +79,19 @@ export default function RightSidebar() {
               <div className="link-matrix-cell header">U{row + 1}</div>
               {Array.from({ length: matrixSize }, (_, col) => {
                 if (row === col) return <div key={`c${col}`} className="link-matrix-cell self">—</div>;
-                const link = linkMap[`${row}-${col}`];
+                const up = link && (link.state === 'LOCKED' || link.state === 'TRACKING');
                 return (
                   <div 
                     key={`c${col}`} 
-                    className={`link-matrix-cell ${link ? 'active' : ''}`}
-                    style={link ? { cursor: 'pointer' } : {}}
+                    className={`link-matrix-cell ${up ? 'active' : ''}`}
+                    style={up ? { cursor: 'pointer' } : {}}
                     onClick={() => {
                       if (!link) return;
                       const idx = links.findIndex(l => (l.from === row && l.to === col) || (l.from === col && l.to === row));
                       if (idx >= 0) useSimStore.getState().setSelectedLink(idx);
                     }}
                   >
-                    {link ? '●' : ''}
+                    {up ? '●' : ''}
                   </div>
                 );
               })}

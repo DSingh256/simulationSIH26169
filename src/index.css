@@ -429,6 +429,95 @@ body, html {
 .lock-marker.lost { color: #ff3b3a; }
 .lock-marker.lost .lock-dot { width: 10px; height: 2px; border-radius: 0; }
 .lock-marker.ok .lock-dot { animation: lock-pulse 1.2s ease-in-out infinite; }
+.lock-marker.search { color: #8a7aaa; }
+.lock-marker.decoy {
+  width: 44px;
+  height: 44px;
+  color: #ff3b3a;
+  opacity: 0.9;
+}
+.lock-marker.decoy .lock-label { color: #ff6b6a; font-size: 7px; }
+.scan-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 72px;
+  height: 72px;
+  transform: translate(-50%, -50%);
+  border: 2px dashed #8a7aaa;
+  border-radius: 50%;
+  animation: pulse-reacquire 1.6s infinite linear;
+  pointer-events: none;
+  z-index: 4;
+}
+.scan-ring-label {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #8a7aaa;
+  font-size: 8px;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+}
+.acquired-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #00e676;
+  text-shadow: 0 0 18px #00e676, 0 1px 4px #000;
+  pointer-events: none;
+  animation: acquired-flash 2.6s ease-out forwards;
+}
+@keyframes pulse-reacquire {
+  0% { transform: translate(-50%, -50%) scale(0.55); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; }
+}
+@keyframes acquired-flash {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -40%) scale(1.1); }
+}
+
+.pat-score-strip {
+  background: #0c0c0e;
+  border-top: 1px solid var(--border);
+}
+.trial-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 24px;
+  background: #12141a;
+  border-bottom: 1px solid var(--border);
+}
+.trial-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-bright);
+}
+.trial-card-meta {
+  margin-top: 3px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+}
+.trial-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 @keyframes lock-pulse {
   0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   50% { opacity: 0.45; transform: translate(-50%, -50%) scale(1.35); }

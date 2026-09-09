@@ -73,33 +73,34 @@ export function uniquePairKey(a, b) {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
 }
 
-function makeLink(from, to) {
+function makeLink(from, to, discoverDelay = 1) {
   return {
     from,
     to,
-    state: 'LOCKED',
+    state: 'SEARCHING',
     distance: 0,
-    angularError: 0.4 + Math.random() * 0.8,
-    predictedError: 0.2 + Math.random() * 0.4,
-    confidence: 0.9,
-    receivedPower: -28,
-    linkMargin: 8,
+    angularError: 2.5,
+    predictedError: 2.0,
+    confidence: 0,
+    receivedPower: -45,
+    linkMargin: 0,
     losClear: true,
+    discoverDelay,
   };
 }
 
-/** Build optical mesh according to the selected scenario. */
+/** Build optical mesh according to the selected scenario. Links start dark — they acquire over time. */
 export function createLinksForScenario(scenario, numUAVs) {
   const n = Math.max(2, numUAVs);
   const seen = new Set();
-  const links = [];
+  const pairs = [];
 
   const add = (a, b) => {
     if (a === b || a < 0 || b < 0 || a >= n || b >= n) return;
     const key = uniquePairKey(a, b);
     if (seen.has(key)) return;
     seen.add(key);
-    links.push(makeLink(a, b));
+    pairs.push([a, b]);
   };
 
   switch (scenario) {
@@ -121,7 +122,20 @@ export function createLinksForScenario(scenario, numUAVs) {
       break;
   }
 
-  return links;
+  return pairs.map(([from, to], i) => makeLink(from, to, 0.85 + i * 1.15));
+}
+
+export function resetLinksToSearch(links) {
+  return links.map((l, i) => ({
+    ...l,
+    state: 'SEARCHING',
+    confidence: 0,
+    losClear: true,
+    receivedPower: -45,
+    linkMargin: 0,
+    angularError: 2.5,
+    discoverDelay: 0.85 + i * 1.15,
+  }));
 }
 
 export function layoutPositions(numUAVs, scenario, altitude) {
@@ -161,4 +175,13 @@ export function linkBudget({ distM, attenuationDbKm, weatherOn, pointingUrad, tu
   const receivedPower = TX_POWER_DBM - geometric - atmos - pointingLoss - scintillation - vibLoss - weatherFlat;
   const linkMargin = receivedPower - RX_SENSITIVITY_DBM;
   return { distKm, receivedPower, linkMargin, pointingLoss };
+}
+
+/** False beacons that sit near the real UAV so the camera must reject them. */
+export function decoyWorldPositions(targetPos) {
+  const [x, y, z] = targetPos;
+  return [
+    { id: 'glint', kind: 'SUN GLINT', color: '#ffe8a0', position: [x + 95, y - 38, z + 55] },
+    { id: 'lamp', kind: 'STREET LAMP', color: '#ff9944', position: [x - 85, y - 150, z + 90] },
+  ];
 }
