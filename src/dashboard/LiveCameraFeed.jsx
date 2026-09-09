@@ -97,8 +97,18 @@ function LiveScene({ targetUav, buildings }) {
 }
 
 export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
-  const signalDropoutActive = useSimStore(s => s.signalDropoutActive);
-  const buildings = useSimStore(s => s.buildings);
+  const store = useSimStore();
+  const signalDropoutActive = store.signalDropoutActive;
+  const buildings = store.buildings;
+  const disturbances = store.disturbances;
+  const turbulenceStrength = store.turbulenceStrength;
+  const noiseStrength = store.noiseStrength;
+  
+  // Find link state for this feed
+  const link = store.links.find(l => l.from === uavIndex);
+  const isLost = link && link.state === 'LOST';
+
+
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', filter: signalDropoutActive ? 'brightness(0)' : 'none' }}>
@@ -108,12 +118,36 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
         <TrackerController uavIndex={uavIndex} targetUav={targetUav} />
         
         <EffectComposer disableNormalPass>
-          <TurbulenceEffect intensity={0.2} />
+          {disturbances.atmosphericTurbulence && (
+            <TurbulenceEffect intensity={turbulenceStrength * 5.0} />
+          )}
+          {disturbances.imageNoise && (
+            <SensorNoiseEffect intensity={noiseStrength * 2.0} />
+          )}
           <Bloom intensity={1.0} luminanceThreshold={0.5} luminanceSmoothing={0.9} />
           <ChromaticAberration offset={[0.0005, 0.0005]} />
           <Vignette eskil={false} offset={0.1} darkness={0.8} />
         </EffectComposer>
       </Canvas>
+      {isLost && (
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.8), rgba(0,0,0,0.8) 2px, transparent 2px, transparent 4px), rgba(255, 0, 0, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          zIndex: 10
+        }}>
+          <div style={{ color: '#ff2222', fontSize: '24px', fontWeight: 'bold', letterSpacing: '2px', textShadow: '0 0 10px red' }}>
+            NO SIGNAL
+          </div>
+          <div style={{ color: '#ff2222', fontSize: '10px', marginTop: 8 }}>
+            LOS OCCLUDED
+          </div>
+        </div>
+      )}
       {sourceUav.trackingState === 'REACQUIRING' && (
         <div style={{
           position: 'absolute',

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSimStore } from '../store/simStore';
 
-export default function HeaderBar() {
+export default function HeaderBar({ scrollToSection }) {
   const simRunning = useSimStore(s => s.simRunning);
   const simPaused = useSimStore(s => s.simPaused);
   
@@ -35,10 +35,11 @@ export default function HeaderBar() {
       </div>
 
       <div style={{ display: 'flex', gap: '3px' }}>
-        <button className="nav-tab active">Telemetry</button>
-        <button className="nav-tab">Optical Feeds</button>
-        <button className="nav-tab">PAT Config</button>
-        <button className="nav-tab">Link Mesh</button>
+        <button className="nav-tab active" onClick={() => scrollToSection?.('telemetry')}>Telemetry</button>
+        <button className="nav-tab" onClick={() => scrollToSection?.('feeds')}>Optical Feeds</button>
+        <button className="nav-tab" onClick={() => scrollToSection?.('perception')}>Perception</button>
+        <button className="nav-tab" onClick={() => scrollToSection?.('mesh')}>Link Mesh</button>
+        <button className="nav-tab" onClick={() => scrollToSection?.('export')}>Export</button>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -52,3 +53,4 @@ export default function HeaderBar() {
     </div>
   );
 }
+

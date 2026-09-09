@@ -156,11 +156,11 @@ export default function MissionWorld() {
         />
       )}
       
-      {/* Lighting — much brighter to show building textures */}
-      <ambientLight intensity={0.8} />
+      {/* Lighting — dynamic based on weather */}
+      <ambientLight intensity={store.environment === 'NIGHT' ? 0.2 : (store.envProfile?.lightIntensity || 1.0) * 0.8} />
       <directionalLight 
         position={[1000, 2000, 1000]} 
-        intensity={2} 
+        intensity={store.environment === 'NIGHT' ? 0.1 : (store.envProfile?.lightIntensity || 1.0) * 2} 
         castShadow 
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
@@ -170,8 +170,12 @@ export default function MissionWorld() {
       <pointLight position={[500, 100, -500]} intensity={2} color="#cccccc" distance={4000} />
       <pointLight position={[-500, 100, 500]} intensity={2} color="#ff6633" distance={4000} />
       
-      {/* Atmospheric fog — pushed back so buildings are visible */}
-      <fog attach="fog" args={['#0a0a0a', 2000, 8000]} />
+      {/* Atmospheric fog — dynamically tied to environment profile */}
+      <fog attach="fog" args={[
+        store.environment === 'NIGHT' ? '#030305' : store.environment === 'OVERCAST' ? '#556677' : store.environment === 'CLOUDY_DYNAMIC' ? '#8899aa' : '#111111', 
+        200, 
+        store.envProfile?.visibilityRange || 8000
+      ]} />
 
       {/* Ground plane with city texture */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>

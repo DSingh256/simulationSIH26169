@@ -8,18 +8,77 @@ export const TrackingState = {
   ACQUIRING: 'ACQUIRING',
 };
 
-function generateWaypoint() {
-  const angle = Math.random() * Math.PI * 2;
-  const radius = Math.random() * 1500;
-  return [Math.cos(angle) * radius, 900 + Math.random() * 200, Math.sin(angle) * radius];
+// ─── Waypoint generation respects altitude ───
+function generateWaypoint(altitude = 1000, scenario = 'MULTI_UAV_MESH', trajectoryType = 'MIXED', index = 0) {
+  const alt = altitude;
+
+  if (scenario === 'POINT_TO_POINT') {
+    // Fly back and forth along a line
+    const side = Math.random() > 0.5 ? 1 : -1;
+    return [side * (800 + Math.random() * 400), alt, (Math.random() - 0.5) * 200];
+  } else if (scenario === 'RELAY_CHAIN') {
+    // Lined up evenly spaced along X axis
+    const slotX = (index - 3) * 600 + (Math.random() - 0.5) * 200;
+    return [slotX, alt, (Math.random() - 0.5) * 300];
+  } else if (scenario === 'STAR_TOPOLOGY') {
+    // Index 0 hovers near center, others orbit around
+    if (index === 0) {
+      return [(Math.random() - 0.5) * 100, alt, (Math.random() - 0.5) * 100];
+    }
+    const angle = (index / 5) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+    const radius = 700 + Math.random() * 300;
+    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
+  }
+
+  // MULTI_UAV_MESH / default
+  let tType = trajectoryType;
+  if (tType === 'MIXED') {
+    tType = ['LINEAR', 'CIRCULAR', 'RANDOM_WALK'][Math.floor(Math.random() * 3)];
+  }
+  
+  if (tType === 'LINEAR') {
+    const side = Math.random() > 0.5 ? 1 : -1;
+    return [side * (500 + Math.random() * 1000), alt, (Math.random() - 0.5) * 2000];
+  } else if (tType === 'CIRCULAR') {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 600 + Math.random() * 800;
+    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
+  } else {
+    // RANDOM_WALK
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * 1500;
+    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
+  }
 }
 
 // Generate initial UAV data
-function createUAV(id, idx) {
-  const angle = (idx / 6) * Math.PI * 2;
-  const radius = 800 + Math.random() * 400;
-  const pos = [Math.cos(angle) * radius, 900 + Math.random() * 200, Math.sin(angle) * radius];
-  const queue = [generateWaypoint(), generateWaypoint(), generateWaypoint()];
+function createUAV(id, idx, altitude = 1000, scenario = 'MULTI_UAV_MESH', trajectoryType = 'MIXED') {
+  let pos;
+  if (scenario === 'RELAY_CHAIN') {
+    pos = [(idx - 3) * 600, altitude, 0];
+  } else if (scenario === 'STAR_TOPOLOGY') {
+    if (idx === 0) {
+      pos = [0, altitude, 0];
+    } else {
+      const angle = (idx / 5) * Math.PI * 2;
+      pos = [Math.cos(angle) * 800, altitude, Math.sin(angle) * 800];
+    }
+  } else if (scenario === 'POINT_TO_POINT') {
+    const side = idx % 2 === 0 ? -1 : 1;
+    pos = [side * (600 + Math.random() * 200), altitude, (idx - 3) * 200];
+  } else {
+    // MULTI_UAV_MESH
+    const angle = (idx / 6) * Math.PI * 2;
+    const radius = 800 + Math.random() * 400;
+    pos = [Math.cos(angle) * radius, altitude, Math.sin(angle) * radius];
+  }
+
+  const queue = [
+    generateWaypoint(altitude, scenario, trajectoryType, idx),
+    generateWaypoint(altitude, scenario, trajectoryType, idx),
+    generateWaypoint(altitude, scenario, trajectoryType, idx),
+  ];
+
   return {
     id,
     position: pos,
@@ -44,49 +103,73 @@ function createUAV(id, idx) {
   };
 }
 
-function createInitialLinks(numUAVs) {
+function createInitialLinks(numUAVs, scenario = 'MULTI_UAV_MESH') {
   const links = [];
-  // Create a mesh network (each UAV links to the next, plus some cross-links)
-  for (let i = 0; i < numUAVs; i++) {
-    const j = (i + 1) % numUAVs;
-    links.push({
-      from: i,
-      to: j,
-      state: 'LOCKED',
-      distance: 1.5 + Math.random() * 2,
-      angularError: Math.random() * 1.5,
-      predictedError: Math.random() * 0.5,
-      confidence: 0.85 + Math.random() * 0.13,
-      receivedPower: -30 + Math.random() * 5,
-      linkMargin: 4 + Math.random() * 4,
-      losClear: true
-    });
+
+  if (scenario === 'POINT_TO_POINT') {
+    // Only adjacent pairs
+    for (let i = 0; i < numUAVs - 1; i += 2) {
+      if (i + 1 < numUAVs) {
+        links.push(createLink(i, i + 1));
+      }
+    }
+    // If odd, connect last to first pair
+    if (numUAVs % 2 !== 0 && numUAVs > 1) {
+      links.push(createLink(numUAVs - 1, 0));
+    }
+  } else if (scenario === 'RELAY_CHAIN') {
+    // Chain: 0→1→2→3→...
+    for (let i = 0; i < numUAVs - 1; i++) {
+      links.push(createLink(i, i + 1));
+    }
+  } else if (scenario === 'STAR_TOPOLOGY') {
+    // Index 0 is hub, all others connect to it
+    for (let i = 1; i < numUAVs; i++) {
+      links.push(createLink(0, i));
+    }
+  } else {
+    // MULTI_UAV_MESH: ring topology
+    for (let i = 0; i < numUAVs; i++) {
+      const j = (i + 1) % numUAVs;
+      links.push(createLink(i, j));
+    }
   }
   return links;
 }
 
+function createLink(from, to) {
+  return {
+    from, to,
+    state: 'LOCKED',
+    distance: 1.5 + Math.random() * 2,
+    angularError: Math.random() * 1.5,
+    predictedError: Math.random() * 0.5,
+    confidence: 0.85 + Math.random() * 0.13,
+    receivedPower: -30 + Math.random() * 5,
+    linkMargin: 4 + Math.random() * 4,
+    losClear: true
+  };
+}
+
 function createBuildings() {
   const buildings = [];
-  // Create a dense grid of 3D buildings
   for (let i = 0; i < 40; i++) {
     buildings.push({
       x: (Math.random() - 0.5) * 3000,
       z: (Math.random() - 0.5) * 3000,
       width: 100 + Math.random() * 200,
       depth: 100 + Math.random() * 200,
-      height: 300 + Math.random() * 800 // Tall enough to occlude drones
+      height: 300 + Math.random() * 800
     });
   }
   return buildings;
 }
 
-// Ray-AABB intersection test: does the line segment from p1→p2 pass through the box [min, max]?
+// Ray-AABB intersection test
 function rayIntersectAABB(p1, p2, min, max) {
   let tmin = 0.0;
   let tmax = 1.0;
-  
   const d = [p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]];
-  
   for (let i = 0; i < 3; i++) {
     if (Math.abs(d[i]) < 1e-6) {
       if (p1[i] < min[i] || p1[i] > max[i]) return false;
@@ -94,11 +177,9 @@ function rayIntersectAABB(p1, p2, min, max) {
       const ood = 1.0 / d[i];
       let t1 = (min[i] - p1[i]) * ood;
       let t2 = (max[i] - p1[i]) * ood;
-      
       if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
       if (t1 > tmin) tmin = t1;
       if (t2 < tmax) tmax = t2;
-      
       if (tmin > tmax) return false;
     }
   }
@@ -109,25 +190,55 @@ function createInitialLog() {
   const now = new Date();
   const fmt = (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const entries = [];
-  for (let i = 0; i < 12; i++) {
-    const t = new Date(now.getTime() - (12 - i) * 3000);
+  for (let i = 0; i < 6; i++) {
+    const t = new Date(now.getTime() - (6 - i) * 3000);
     entries.push({ time: fmt(t), message: [
-      'Simulation started',
-      'UAV-1 initialized',
-      'UAV-2 initialized',
-      'UAV-3 initialized',
-      'UAV-4 initialized',
-      'UAV-5 initialized',
-      'UAV-6 initialized',
-      'Link established: UAV-1 ↔ UAV-2',
-      'UAV-3 detected by FOV',
-      'Coarse tracking engaged: UAV-3',
-      'Turbulence intensity: 0.5',
-      'Tracking originated: UAV-3',
+      'Simulation initialized',
+      'UAV nodes spawned',
+      'Link mesh established',
+      'PAT pipeline active',
+      'Coarse tracking engaged',
+      'System nominal',
     ][i] });
   }
   return entries;
 }
+
+// ─── Environment disturbance profiles ───
+const ENV_PROFILES = {
+  CLEAR: {
+    turbulenceBase: 0.1,
+    noiseBase: 0.1,
+    occlusionChance: 0.0,
+    visibilityRange: 8000,
+    fogDensity: 0,
+    lightIntensity: 1.0,
+  },
+  CLOUDY_DYNAMIC: {
+    turbulenceBase: 0.4,
+    noiseBase: 0.3,
+    occlusionChance: 0.15,
+    visibilityRange: 5000,
+    fogDensity: 0.3,
+    lightIntensity: 0.7,
+  },
+  OVERCAST: {
+    turbulenceBase: 0.6,
+    noiseBase: 0.5,
+    occlusionChance: 0.25,
+    visibilityRange: 3000,
+    fogDensity: 0.6,
+    lightIntensity: 0.4,
+  },
+  NIGHT: {
+    turbulenceBase: 0.3,
+    noiseBase: 0.7,
+    occlusionChance: 0.05,
+    visibilityRange: 4000,
+    fogDensity: 0.2,
+    lightIntensity: 0.1,
+  },
+};
 
 export const useSimStore = create((set, get) => ({
   // ─── Global Simulation Config ───
@@ -141,17 +252,20 @@ export const useSimStore = create((set, get) => ({
   simTime: 0,
   simSeed: 42,
 
-  // ─── Camera / Sensor (kept for individual feeds) ───
+  // ─── Environment profile (computed) ───
+  envProfile: ENV_PROFILES['CLOUDY_DYNAMIC'],
+
+  // ─── Camera / Sensor ───
   fov: 3,
   zoom: 1,
-  turbulenceStrength: 0.5,
+  turbulenceStrength: 0.4,
   noiseStrength: 0.3,
 
   // ─── Per-UAV State ───
-  uavs: Array.from({ length: 6 }, (_, i) => createUAV(`UAV-${i + 1}`, i)),
+  uavs: Array.from({ length: 6 }, (_, i) => createUAV(`UAV-${i + 1}`, i, 1000, 'MULTI_UAV_MESH', 'MIXED')),
 
   // ─── Link Matrix ───
-  links: createInitialLinks(6),
+  links: createInitialLinks(6, 'MULTI_UAV_MESH'),
 
   // ─── Cityscape ───
   buildings: createBuildings(),
@@ -168,7 +282,7 @@ export const useSimStore = create((set, get) => ({
   },
 
   // ─── Selected link for detail view ───
-  selectedLink: 0, // index into links array
+  selectedLink: 0,
 
   // ─── Tracking (legacy, used by camera feed) ───
   trackingState: TrackingState.TRACKING,
@@ -219,10 +333,55 @@ export const useSimStore = create((set, get) => ({
   eventLog: createInitialLog(),
 
   // ─── Actions ───
-  setNumUAVs: (n) => set({ numUAVs: n }),
-  setEnvironment: (env) => set({ environment: env }),
-  setScenario: (s) => set({ scenario: s }),
-  setTrajectoryType: (t) => set({ trajectoryType: t }),
+  setNumUAVs: (n) => set(state => {
+    const s = state.scenario;
+    const t = state.trajectoryType;
+    const a = state.globalAltitude;
+    const uavs = Array.from({ length: n }, (_, i) =>
+      i < state.uavs.length ? state.uavs[i] : createUAV(`UAV-${i + 1}`, i, a, s, t)
+    );
+    const links = createInitialLinks(n, s);
+    return { numUAVs: n, uavs, links };
+  }),
+
+  setEnvironment: (env) => set(state => {
+    const profile = ENV_PROFILES[env] || ENV_PROFILES.CLEAR;
+    const logMsg = `Environment changed to ${env}`;
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const log = [...state.eventLog, { time: t, message: logMsg }];
+    if (log.length > 50) log.shift();
+    return {
+      environment: env,
+      envProfile: profile,
+      turbulenceStrength: profile.turbulenceBase,
+      noiseStrength: profile.noiseBase,
+      eventLog: log,
+    };
+  }),
+
+  setScenario: (s) => set(state => {
+    const n = state.numUAVs;
+    const a = state.globalAltitude;
+    const traj = state.trajectoryType;
+    const uavs = Array.from({ length: n }, (_, i) => createUAV(`UAV-${i + 1}`, i, a, s, traj));
+    const links = createInitialLinks(n, s);
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const log = [...state.eventLog, { time: t, message: `Scenario changed to ${s.replace(/_/g, ' ')}` }];
+    if (log.length > 50) log.shift();
+    return { scenario: s, uavs, links, eventLog: log };
+  }),
+
+  setTrajectoryType: (t) => set(state => {
+    const n = state.numUAVs;
+    const a = state.globalAltitude;
+    const s = state.scenario;
+    const uavs = Array.from({ length: n }, (_, i) => createUAV(`UAV-${i + 1}`, i, a, s, t));
+    const msg = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const log = [...state.eventLog, { time: msg, message: `Trajectory changed to ${t}` }];
+    if (log.length > 50) log.shift();
+    return { trajectoryType: t, uavs, eventLog: log };
+  }),
+
   setSimRunning: (r) => set({ simRunning: r }),
   setSimPaused: (p) => set({ simPaused: p }),
   setSimSpeed: (s) => set({ simSpeed: s }),
@@ -235,18 +394,53 @@ export const useSimStore = create((set, get) => ({
     const uavs = state.uavs.map(u => ({ ...u, speed: v }));
     return { globalSpeed: v, uavs };
   }),
+
+  // When altitude changes: move all UAVs to new altitude, regenerate their waypoints
+  // at that altitude, and force all links into ACQUIRING state to simulate re-establishment
   setGlobalAltitude: (v) => set(state => {
-    const uavs = state.uavs.map(u => ({ ...u, altitude: v, position: [u.position[0], v, u.position[2]] }));
-    return { globalAltitude: v, uavs };
+    const s = state.scenario;
+    const traj = state.trajectoryType;
+    const uavs = state.uavs.map((u, i) => {
+      // Regenerate waypoint queue at new altitude
+      const newQueue = [
+        generateWaypoint(v, s, traj, i),
+        generateWaypoint(v, s, traj, i),
+        generateWaypoint(v, s, traj, i),
+      ];
+      return {
+        ...u,
+        altitude: v,
+        position: [u.position[0], v, u.position[2]],
+        waypointQueue: newQueue,
+        currentTarget: newQueue[0],
+      };
+    });
+
+    // Force links into ACQUIRING so they re-establish at new altitude
+    const links = state.links.map(l => ({
+      ...l,
+      state: 'ACQUIRING',
+      confidence: 0.2,
+    }));
+
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const log = [...state.eventLog, { time: t, message: `Altitude changed to ${v}m — links re-establishing` }];
+    if (log.length > 50) log.shift();
+
+    return { globalAltitude: v, uavs, links, eventLog: log };
   }),
 
-  setDisturbance: (key, val) => set(state => ({
-    disturbances: { ...state.disturbances, [key]: val }
-  })),
+  setDisturbance: (key, val) => set(state => {
+    const newDist = { ...state.disturbances, [key]: val };
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const log = [...state.eventLog, { time: t, message: `${key}: ${val ? 'ON' : 'OFF'}` }];
+    if (log.length > 50) log.shift();
+    return { disturbances: newDist, eventLog: log };
+  }),
 
   setSelectedLink: (idx) => set({ selectedLink: idx }),
 
-  // Legacy actions (for camera feed tracking) - Sync to UAV-0 for the dashboard
+  // Legacy actions
   setTargetPosition: (pos) => set({ targetPosition: pos }),
   setDetection: (uavIndex, box, confidence) => set(state => {
     const uavs = [...state.uavs];
@@ -288,7 +482,7 @@ export const useSimStore = create((set, get) => ({
     if(uavs[idx]) {
       const q = [...uavs[idx].waypointQueue];
       q.shift();
-      q.push(generateWaypoint());
+      q.push(generateWaypoint(state.globalAltitude, state.scenario, state.trajectoryType, idx));
       uavs[idx] = { ...uavs[idx], waypointQueue: q, currentTarget: q[0] };
     }
     return { uavs };
@@ -298,7 +492,6 @@ export const useSimStore = create((set, get) => ({
     const errMag = Math.sqrt(err.x*err.x + err.y*err.y) * 1000;
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], pointingError: errMag };
     
-    // Also push to tracking history
     const history = [...state.trackingHistory];
     history.push({
       time: state.simTime.toFixed(1),
@@ -326,11 +519,15 @@ export const useSimStore = create((set, get) => ({
     return { uavs };
   }),
 
-  // Physical Line-of-Sight check: ray-cast each link against ALL buildings
+  // Physical Line-of-Sight check against ALL buildings
   updateLinksLOS: () => set(state => {
     const newLinks = [...state.links];
     let changed = false;
     const logEntries = [];
+
+    // Altitude-based link degradation: lower altitude → higher chance of building occlusion
+    // This is handled naturally by the ray-AABB check since UAVs at lower altitude
+    // are more likely to be blocked by buildings
 
     for (let i = 0; i < newLinks.length; i++) {
       const link = newLinks[i];
@@ -339,7 +536,13 @@ export const useSimStore = create((set, get) => ({
       const p1 = state.uavs[link.from].position;
       const p2 = state.uavs[link.to].position;
 
-      // Test ray against every building bounding box
+      // Calculate distance between UAVs for link quality
+      const dx = p2[0] - p1[0];
+      const dy = p2[1] - p1[1];
+      const dz = p2[2] - p1[2];
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) / 1000; // km
+
+      // Test ray against every building
       let occluded = false;
       for (const b of state.buildings) {
         const bmin = [b.x - b.width / 2, 0, b.z - b.depth / 2];
@@ -350,31 +553,64 @@ export const useSimStore = create((set, get) => ({
         }
       }
 
-      // State transitions based on physical occlusion
+      // Environment-based random occlusion (weather effects)
+      if (!occluded && state.disturbances.weatherEffects) {
+        const envOccChance = state.envProfile.occlusionChance;
+        if (Math.random() < envOccChance * 0.02) {
+          occluded = true;
+        }
+      }
+
+      // Temporary occlusion disturbance toggle
+      if (!occluded && state.disturbances.temporaryOcclusion) {
+        if (Math.random() < 0.005) {
+          occluded = true;
+        }
+      }
+
+      // State transitions
       if (occluded && link.losClear) {
-        // JUST GOT BLOCKED — laser path is obstructed
-        newLinks[i] = { ...link, losClear: false, state: 'LOST', confidence: 0 };
-        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} LOST — building obstruction`);
+        newLinks[i] = { ...link, losClear: false, state: 'LOST', confidence: 0, distance: dist };
+        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} LOST — obstruction`);
         changed = true;
       } else if (!occluded && !link.losClear) {
-        // JUST CLEARED — begin re-acquisition
-        newLinks[i] = { ...link, losClear: true, state: 'ACQUIRING', confidence: 0.3 };
-        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} re-acquiring — LOS clear`);
+        newLinks[i] = { ...link, losClear: true, state: 'ACQUIRING', confidence: 0.3, distance: dist };
+        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} re-acquiring`);
         changed = true;
       } else if (!occluded && link.state === 'ACQUIRING') {
-        // Gradually lock on (simulate PAT re-acquisition time)
-        const newConf = link.confidence + 0.02;
+        // Environment affects re-acquisition speed
+        const acqSpeed = state.envProfile.lightIntensity * 0.02;
+        const newConf = link.confidence + acqSpeed;
         if (newConf >= 0.9) {
-          newLinks[i] = { ...link, state: 'LOCKED', confidence: 0.95 };
+          newLinks[i] = { ...link, state: 'LOCKED', confidence: 0.95, distance: dist };
           logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} LOCKED`);
         } else {
-          newLinks[i] = { ...link, confidence: newConf };
+          newLinks[i] = { ...link, confidence: newConf, distance: dist };
         }
+        changed = true;
+      } else if (!occluded && link.state === 'LOCKED') {
+        // Update distance and link metrics
+        const envNoise = state.disturbances.atmosphericTurbulence ? state.envProfile.turbulenceBase * Math.random() : 0;
+        const imgNoise = state.disturbances.imageNoise ? state.envProfile.noiseBase * Math.random() * 0.5 : 0;
+        const vibration = state.disturbances.platformVibration ? Math.random() * 0.3 : 0;
+        
+        const angError = (0.2 + envNoise + imgNoise + vibration) * (1 + dist * 0.1);
+        const margin = Math.max(0, 8 - dist * 1.5 - envNoise * 3);
+        const rxPow = -25 - dist * 3 - envNoise * 5;
+
+        newLinks[i] = {
+          ...link,
+          distance: dist,
+          angularError: angError,
+          predictedError: angError * 0.7,
+          linkMargin: margin,
+          receivedPower: rxPow,
+          confidence: Math.max(0.85, 1 - angError * 0.05),
+        };
         changed = true;
       }
     }
 
-    // Push events to log
     if (logEntries.length > 0) {
       const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const log = [...state.eventLog];
@@ -393,7 +629,6 @@ export const useSimStore = create((set, get) => ({
     return { links };
   }),
 
-  // Add event
   addEvent: (message) => set(state => {
     const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const log = [...state.eventLog, { time: t, message }];
@@ -401,21 +636,19 @@ export const useSimStore = create((set, get) => ({
     return { eventLog: log };
   }),
 
-  // Add tracking history point
   addTrackingPoint: (point) => set(state => {
     const hist = [...state.trackingHistory, point];
     if (hist.length > 250) hist.shift();
     return { trackingHistory: hist };
   }),
 
-  // Reset simulation
-  resetSim: () => set({
+  resetSim: () => set(state => ({
     simTime: 0,
     simRunning: false,
     simPaused: false,
-    uavs: Array.from({ length: 6 }, (_, i) => createUAV(`UAV-${i + 1}`, i)),
-    links: createInitialLinks(6),
+    uavs: Array.from({ length: state.numUAVs }, (_, i) => createUAV(`UAV-${i + 1}`, i, state.globalAltitude, state.scenario, state.trajectoryType)),
+    links: createInitialLinks(state.numUAVs, state.scenario),
     trackingHistory: [],
     eventLog: createInitialLog(),
-  }),
+  })),
 }));
