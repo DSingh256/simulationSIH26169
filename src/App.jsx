@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useSimStore } from './store/simStore';
 
@@ -11,36 +11,15 @@ import LinkAnalysis from './dashboard/LinkAnalysis';
 import SystemPerformance from './dashboard/SystemPerformance';
 import EventLog from './dashboard/EventLog';
 import UAVTableSection from './dashboard/UAVTableSection';
-import HybridFusionPanel from './dashboard/HybridFusionPanel';
-import StateEstimatorPanel from './dashboard/StateEstimatorPanel';
-import TelemetryExport from './dashboard/TelemetryExport';
-import FSOCTrackingView from './dashboard/FSOCTrackingView';
-import PipelineDiagram from './dashboard/PipelineDiagram';
-import DualTerminalView from './dashboard/DualTerminalView';
-import PerformanceLog from './dashboard/PerformanceLog';
 
 import CameraRig from './scene/CameraRig';
 import MissionWorld from './scene/MissionWorld';
 
 function App() {
-  const [showControls, setShowControls] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const store = useSimStore();
   const uavs = store.uavs.slice(0, store.numUAVs);
   const links = store.links;
-
-  // Section refs for nav scroll
-  const sectionRefs = {
-    telemetry: useRef(null),
-    feeds: useRef(null),
-    config: useRef(null),
-    mesh: useRef(null),
-    perception: useRef(null),
-    export: useRef(null),
-  };
-
-  const scrollToSection = (key) => {
-    sectionRefs[key]?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
   
   const lockedLinks = links.filter(l => l.state === 'LOCKED').length;
   const avgConf = uavs.length > 0 ? (uavs.reduce((s, u) => s + u.confidence, 0) / uavs.length) : 0;
@@ -49,7 +28,7 @@ function App() {
   return (
     <div>
       {/* ═══ HEADER ═══ */}
-      <HeaderBar scrollToSection={scrollToSection} />
+      <HeaderBar />
 
       {/* ═══ STATUS SUB-BAR ═══ */}
       <div className="status-subbar">
@@ -61,6 +40,7 @@ function App() {
         <div style={{ display: 'flex', gap: 20 }}>
           <span>ENV: {store.environment}</span>
           <span>SCENARIO: {store.scenario.replace(/_/g, ' ')}</span>
+          <span>ATTEN {(store.opticalAttenuationDbKm ?? 0).toFixed(2)} dB/km</span>
           <span>{store.simSpeed.toFixed(1)}x RT</span>
         </div>
       </div>
@@ -103,7 +83,7 @@ function App() {
       </div>
 
       {/* ═══ TWO-COL: 3D VIEW + PIPELINE ═══ */}
-      <div ref={sectionRefs.telemetry} className="section-bar">
+      <div className="section-bar">
         <div>
           <div className="section-tag">Operational View</div>
         </div>
@@ -117,7 +97,6 @@ function App() {
           </div>
           <div className="viewport-3d">
             <Canvas gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false }}>
-              <color attach="background" args={['#0a0a0a']} />
               <CameraRig />
               <MissionWorld />
             </Canvas>
@@ -142,47 +121,11 @@ function App() {
       </div>
       <TrackingPerformanceChart />
 
-      {/* ═══ PERCEPTION FUSION & STATE ESTIMATOR ═══ */}
-      <div ref={sectionRefs.perception} className="section-bar">
-        <div className="section-tag">Perception & Estimation</div>
-        <div className="section-tag">Live</div>
-      </div>
-      <div className="perception-section">
-        <div className="perception-section-header">
-          <div>
-            <div className="perception-section-title">Hybrid Perception & State Estimation</div>
-            <div className="perception-section-desc">Dual-detector safe fusion with α-β temporal consistency gate — closed-loop perception stack.</div>
-          </div>
-        </div>
-        <div className="perception-grid">
-          {store.p4RunActive ? <DualTerminalView /> : <FSOCTrackingView />}
-          <PipelineDiagram />
-          <HybridFusionPanel />
-          <StateEstimatorPanel />
-        </div>
-      </div>
-
-      {/* ═══ TELEMETRY EXPORT ═══ */}
-      <div ref={sectionRefs.export} className="section-bar">
-        <div className="section-tag">Data Export</div>
-        <div className="section-tag">42-Column CSV</div>
-      </div>
-      <div className="telemetry-section">
-        <div className="telemetry-section-header">
-          <div>
-            <div className="telemetry-section-title">Telemetry Pipeline</div>
-            <div className="telemetry-section-desc">Record and export full simulation telemetry for offline analysis and validation.</div>
-          </div>
-        </div>
-        <TelemetryExport />
-      </div>
-
       {/* ═══ CAMERA FEEDS (3-card grid) ═══ */}
-      <div ref={sectionRefs.feeds} />
       <CameraFeedsSection />
 
       {/* ═══ TWO-COL: LINK ANALYSIS + EVENT LOG ═══ */}
-      <div ref={sectionRefs.mesh} className="section-bar">
+      <div className="section-bar">
         <div className="section-tag">Link Analysis</div>
         <div className="section-tag">Event Log</div>
       </div>
@@ -196,7 +139,6 @@ function App() {
       </div>
 
       {/* ═══ UAV TABLE ═══ */}
-      <div ref={sectionRefs.config} />
       <UAVTableSection />
 
       {/* ═══ FOOTER ═══ */}
@@ -210,8 +152,6 @@ function App() {
         {showControls ? '✕' : '⚙'}
       </button>
       {showControls && <ControlsPanel />}
-
-      <PerformanceLog />
     </div>
   );
 }

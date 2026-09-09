@@ -2,11 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useSimStore } from '../store/simStore';
 import { detectBlob } from './detector';
-import { updateStateMachine } from './stateMachine';
 import { PIDController } from './pid';
 import { loadCNNClassifier, classifyCandidates } from './cnnClassifier';
 
-export default function TrackerController({ uavIndex = 0 }) {
+export default function TrackerController({ uavIndex = 0, targetUav }) {
   const { gl, size } = useThree();
   const workerRef = useRef(null);
   const [modelLoaded, setModelLoaded] = useState(false);
@@ -58,8 +57,10 @@ export default function TrackerController({ uavIndex = 0 }) {
           if (confidence < 0.3) {
             nextState = 'REACQUIRING';
             // Latch current physical target position (from targetUav)
-            if (targetUav) {
-              storeState.setReacquireState(uavIndex, storeState.simTime, [...targetUav.position]);
+            const link = storeState.links.find((l) => l.from === uavIndex);
+            const peer = storeState.uavs[link?.to];
+            if (peer) {
+              storeState.setReacquireState(uavIndex, storeState.simTime, [...peer.position]);
             }
             storeState.setMotionOverrideActive(uavIndex, true);
             storeState.addEvent(`UAV-${uav.id} lock lost — returning to last position`);
@@ -112,9 +113,9 @@ export default function TrackerController({ uavIndex = 0 }) {
         }
         
         if (nextState === 'TRACKING' || nextState === 'LOCKED' || nextState === 'REACQUIRING') {
-          // PID update -> angular correction
-          const corrX = pidX.current.update(errX, 1/15);
-          const corrY = pidY.current.update(errY, 1/15);
+          const dtPid = (1 / 15) / Math.max(storeState.simSpeed, 0.25);
+          const corrX = pidX.current.update(errX, dtPid);
+          const corrY = pidY.current.update(errY, dtPid);
           
           const currentCorrection = useSimStore.getState().cameraCorrection;
           setCameraCorrection({
@@ -129,6 +130,8 @@ export default function TrackerController({ uavIndex = 0 }) {
   }, [size, setDetection, setPointingError, setTrackingState, setCameraCorrection]);
 
   useFrame(async (state) => {
+    const sim = useSimStore.getState();
+    if (!sim.simRunning || sim.simPaused) return;
     frameCounter.current++;
     if (frameCounter.current % 4 !== 0) return; // ~15 FPS
     if (!modelLoaded) return;

@@ -8,7 +8,7 @@ const FEED_INFO = [
   { title: 'Thermal Infrared', desc: 'IR band imaging for target discrimination against background clutter.' },
 ];
 
-function FeedCard({ uav, uavIndex, targetUav, info }) {
+function FeedCard({ uav, uavIndex, targetUav, info, link }) {
   const stateColor = (state) => {
     switch(state) {
       case 'LOCKED': return '#c87832';
@@ -28,7 +28,7 @@ function FeedCard({ uav, uavIndex, targetUav, info }) {
     <div className="feed-card">
       <div className="feed-viewport">
         {targetUav ? (
-          <LiveCameraFeed sourceUav={uav} targetUav={targetUav} uavIndex={uavIndex} />
+          <LiveCameraFeed sourceUav={uav} targetUav={targetUav} uavIndex={uavIndex} link={link} />
         ) : (
           <div style={{ width: '100%', height: '100%', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333', fontSize: 10 }}>STANDBY</div>
         )}
@@ -67,14 +67,16 @@ export default function CameraFeedsSection() {
       </div>
       <div className="feeds-grid">
         {uavs.map((uav, i) => {
-          const link = store.links.find(l => l.from === i);
-          const targetUav = link ? store.uavs[link.to] : null;
+          const link = store.links.find(l => l.from === i) || store.links.find(l => l.to === i);
+          const peerIdx = link ? (link.from === i ? link.to : link.from) : -1;
+          const targetUav = peerIdx >= 0 ? store.uavs[peerIdx] : null;
           return (
             <FeedCard
               key={uav.id}
               uav={uav}
               uavIndex={i}
               targetUav={targetUav}
+              link={link}
               info={FEED_INFO[i] || FEED_INFO[0]}
             />
           );

@@ -1,6 +1,7 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useSimStore } from '../store/simStore';
 
 export default function UAVNode({ uav, isActive }) {
   const groupRef = useRef();
@@ -19,38 +20,34 @@ export default function UAVNode({ uav, isActive }) {
       case 'TRACKING': return new THREE.Color('#4ca854');
       case 'REACQUIRING': return new THREE.Color('#8a7aaa');
       case 'ACQUIRING': return new THREE.Color('#c89832');
-      // Part 4 terminal phase colors
-      case 'DEPLOYED': return new THREE.Color('#7E8B93');
-      case 'LINK_ESTABLISHING': return new THREE.Color('#e8a832');
-      case 'COARSE_TRACK': return new THREE.Color('#00e676');
-      case 'REACQUIRE': return new THREE.Color('#8a7aaa');
       default: return new THREE.Color('#c43a3a');
     }
   }, [uav.trackingState]);
   
-  // Animate hovering + spinning rotors
-  useFrame(({ clock }) => {
-    const t = clock.getElapsedTime();
-    const idOffset = uav.id.charCodeAt(4);
-    
+  useFrame(({ clock }, delta) => {
+    const { simRunning, simPaused, simSpeed, simTime, disturbances } = useSimStore.getState();
+    const frozen = !simRunning || simPaused;
+    const t = frozen ? simTime : clock.getElapsedTime() * simSpeed;
+    const idOffset = uav.id.charCodeAt(4) || 0;
+    const vib = disturbances.platformVibration && !frozen ? 1 : 0;
+
     if (groupRef.current) {
       groupRef.current.position.set(
-        uav.position[0],
-        uav.position[1] + Math.sin(t * 2 + idOffset) * 8,
-        uav.position[2]
+        uav.position[0] + vib * Math.sin(t * 28 + idOffset) * 1.6,
+        uav.position[1] + Math.sin(t * 2 + idOffset) * 8 + vib * Math.sin(t * 41) * 0.8,
+        uav.position[2] + vib * Math.cos(t * 31 + idOffset) * 1.6
       );
-      // Gentle tilt based on movement
-      groupRef.current.rotation.z = Math.sin(t * 0.5 + idOffset) * 0.05;
-      groupRef.current.rotation.x = Math.cos(t * 0.3 + idOffset) * 0.05;
+      groupRef.current.rotation.z = Math.sin(t * 0.5 + idOffset) * 0.05 + vib * Math.sin(t * 22) * 0.04;
+      groupRef.current.rotation.x = Math.cos(t * 0.3 + idOffset) * 0.05 + vib * Math.cos(t * 19) * 0.03;
     }
-    
-    // Spin rotors
-    const speed = 25;
-    [rotor1, rotor2, rotor3, rotor4].forEach(r => {
-      if (r.current) r.current.rotation.y += speed * 0.016;
-    });
-    
-    // Pulse beacon
+
+    if (!frozen) {
+      const spin = 25 * Math.min(delta, 0.05) * simSpeed * 60;
+      [rotor1, rotor2, rotor3, rotor4].forEach((r) => {
+        if (r.current) r.current.rotation.y += spin * 0.016;
+      });
+    }
+
     if (beaconRef.current) {
       beaconRef.current.material.opacity = 0.5 + Math.sin(t * 4 + idOffset) * 0.5;
     }

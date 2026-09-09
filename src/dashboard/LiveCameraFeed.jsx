@@ -5,43 +5,93 @@ import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-thr
 import * as THREE from 'three';
 
 import { useSimStore } from '../store/simStore';
+import { ENV_PRESETS } from '../sim/simConfig';
 import { TurbulenceEffect } from '../scene/TurbulenceEffect';
 import { SensorNoiseEffect } from '../scene/SensorNoiseEffect';
 import TrackerController from '../sim/TrackerController';
 import UAVNode from '../scene/UAVNode';
+import RainParticles from '../scene/RainParticles';
 
-// A camera that rigidly attaches to source UAV and looks at target UAV (plus PID corrections)
+const _look = new THREE.Vector3();
+const _src = new THREE.Vector3();
+const _tgt = new THREE.Vector3();
+const _proj = new THREE.Vector3();
+
 function TrackingCameraRig({ sourcePos, targetPos }) {
   const cameraRef = useRef();
   const fov = useSimStore((state) => state.fov);
   const cameraCorrection = useSimStore((state) => state.cameraCorrection);
-  
-  useFrame(() => {
-    if (cameraRef.current) {
-      cameraRef.current.position.set(...sourcePos);
-      cameraRef.current.lookAt(...targetPos);
-      // Apply the cumulative PID correction as a small rotation
-      cameraRef.current.rotation.y += -cameraCorrection.x * 0.1;
-      cameraRef.current.rotation.x += cameraCorrection.y * 0.1;
-      
-      cameraRef.current.fov = fov;
-      cameraRef.current.updateProjectionMatrix();
+
+  useFrame(({ clock }) => {
+    if (!cameraRef.current) return;
+    const { disturbances, simRunning, simPaused, simSpeed, occlusionActive } = useSimStore.getState();
+    _src.set(...sourcePos);
+    _tgt.set(...targetPos);
+    _look.copy(_tgt).sub(_src);
+    if (_look.lengthSq() < 1e-4) _look.set(0, 0, -1);
+    else _look.normalize();
+    cameraRef.current.position.copy(_src).addScaledVector(_look, -90);
+    cameraRef.current.lookAt(_tgt);
+    cameraRef.current.rotation.y += -cameraCorrection.x * 0.1;
+    cameraRef.current.rotation.x += cameraCorrection.y * 0.1;
+
+    if (simRunning && !simPaused && disturbances.cameraMotion) {
+      const t = clock.getElapsedTime() * simSpeed;
+      cameraRef.current.rotation.y += Math.sin(t * 7.3) * 0.004;
+      cameraRef.current.rotation.x += Math.cos(t * 5.1) * 0.003;
     }
+    if (simRunning && !simPaused && disturbances.platformVibration) {
+      cameraRef.current.rotation.z = (Math.random() - 0.5) * 0.012;
+    } else {
+      cameraRef.current.rotation.z = 0;
+    }
+    if (occlusionActive) {
+      cameraRef.current.rotation.y += 0.01;
+    }
+
+    cameraRef.current.fov = Math.max(fov, 14);
+    cameraRef.current.updateProjectionMatrix();
   });
 
   return (
     <PerspectiveCamera
       ref={cameraRef}
       makeDefault
+      fov={16}
       near={1}
       far={15000}
     />
   );
 }
 
-// Scene specifically for the live feed — renders buildings and target UAV as seen through sensor
+function TargetProjector({ targetPos, linkUp, hudRef }) {
+  useFrame(({ camera }) => {
+    const hud = hudRef.current;
+    if (!hud) return;
+    _proj.set(targetPos[0], targetPos[1], targetPos[2]).project(camera);
+    const inView = _proj.z < 1 && Math.abs(_proj.x) < 0.98 && Math.abs(_proj.y) < 0.98;
+    const seen = inView && linkUp;
+    if (inView) {
+      hud.style.setProperty('--mx', `${(_proj.x * 0.5 + 0.5) * 100}%`);
+      hud.style.setProperty('--my', `${(-_proj.y * 0.5 + 0.5) * 100}%`);
+    } else {
+      hud.style.setProperty('--mx', '50%');
+      hud.style.setProperty('--my', '50%');
+    }
+    const label = hud.querySelector('.lock-label');
+    if (label) label.textContent = seen ? 'CONNECTION FOUND' : 'CONNECTION BROKEN';
+    hud.classList.toggle('ok', seen);
+    hud.classList.toggle('lost', !seen);
+  });
+  return null;
+}
+
 function LiveScene({ targetUav, buildings }) {
   const buildingTexture = useLoader(THREE.TextureLoader, '/building.jpg');
+  const environment = useSimStore((s) => s.environment);
+  const weatherOn = useSimStore((s) => s.disturbances.weatherEffects);
+  const occlusionActive = useSimStore((s) => s.occlusionActive);
+  const env = ENV_PRESETS[environment] || ENV_PRESETS.CLOUDY_DYNAMIC;
 
   const buildingMat = useMemo(() => {
     const mat = new THREE.MeshStandardMaterial({
@@ -57,22 +107,29 @@ function LiveScene({ targetUav, buildings }) {
 
   return (
     <>
-      <color attach="background" args={['#030308']} />
-      <ambientLight intensity={0.8} />
-      <directionalLight position={[1000, 2000, 1000]} intensity={1.5} />
-      <fog attach="fog" args={['#030308', 1000, 10000]} />
-      
-      {/* Render the actual drone model */}
-      <UAVNode uav={targetUav} isActive={true} />
-      
-      {/* Invisible bright core to ensure detector threshold always has something to lock onto from far away */}
-      <mesh position={targetUav.position}>
-        <sphereGeometry args={[10, 16, 16]} />
-        <meshBasicMaterial color="#fff" toneMapped={false} />
-      </mesh>
-      <pointLight position={targetUav.position} color="#ffffff" intensity={3} distance={200} />
-      
-      {/* Decoy glint if active */}
+      <color attach="background" args={[env.bg]} />
+      <ambientLight intensity={env.ambient * 0.85} />
+      <directionalLight position={env.sunPosition} intensity={env.sun * 0.8} />
+      <fog attach="fog" args={[env.fogColor, weatherOn ? 600 : 1000, weatherOn ? 6000 : 10000]} />
+
+      {!occlusionActive && (
+        <>
+          <UAVNode uav={targetUav} isActive={true} />
+          <mesh position={targetUav.position}>
+            <sphereGeometry args={[10, 16, 16]} />
+            <meshBasicMaterial color="#fff" toneMapped={false} />
+          </mesh>
+          <pointLight position={targetUav.position} color="#ffffff" intensity={3} distance={200} />
+        </>
+      )}
+
+      {occlusionActive && (
+        <mesh position={[targetUav.position[0] + 8, targetUav.position[1], targetUav.position[2] + 12]}>
+          <boxGeometry args={[80, 90, 18]} />
+          <meshStandardMaterial color="#111" />
+        </mesh>
+      )}
+
       {useSimStore.getState().sunGlintActive && (
         <mesh position={[targetUav.position[0] + 50, targetUav.position[1] - 30, targetUav.position[2]]}>
           <sphereGeometry args={[10, 16, 16]} />
@@ -80,74 +137,66 @@ function LiveScene({ targetUav, buildings }) {
         </mesh>
       )}
 
-      {/* Buildings that can occlude the target — dark silhouettes with subtle texture */}
       {buildings.map((b, i) => (
         <mesh key={`b-${i}`} position={[b.x, b.height / 2, b.z]} material={buildingMat}>
           <boxGeometry args={[b.width, b.height, b.depth]} />
         </mesh>
       ))}
-      
-      {/* Ground plane */}
+
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[10000, 10000]} />
         <meshStandardMaterial color="#050508" />
       </mesh>
+
+      {weatherOn && <RainParticles count={2200} spread={2800} ceiling={1800} />}
     </>
   );
 }
 
-export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
-  const store = useSimStore();
-  const signalDropoutActive = store.signalDropoutActive;
-  const buildings = store.buildings;
-  const disturbances = store.disturbances;
-  const turbulenceStrength = store.turbulenceStrength;
-  const noiseStrength = store.noiseStrength;
-  
-  // Find link state for this feed
-  const link = store.links.find(l => l.from === uavIndex);
-  const isLost = link && link.state === 'LOST';
-
-
+export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex, link }) {
+  const signalDropoutActive = useSimStore((s) => s.signalDropoutActive);
+  const buildings = useSimStore((s) => s.buildings);
+  const disturbances = useSimStore((s) => s.disturbances);
+  const occlusionActive = useSimStore((s) => s.occlusionActive);
+  const hudRef = useRef(null);
+  const linkUp = !!(link && link.losClear && link.state !== 'LOST' && !occlusionActive && !signalDropoutActive);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', filter: signalDropoutActive ? 'brightness(0)' : 'none' }}>
+    <div style={{
+      width: '100%',
+      height: '100%',
+      position: 'relative',
+      filter: signalDropoutActive
+        ? 'brightness(0.15) contrast(1.4)'
+        : disturbances.motionBlur
+          ? 'blur(0.6px)'
+          : 'none',
+    }}
+    >
       <Canvas gl={{ preserveDrawingBuffer: true, antialias: false, alpha: false }}>
         <LiveScene targetUav={targetUav} buildings={buildings} />
         <TrackingCameraRig sourcePos={sourceUav.position} targetPos={targetUav.position} />
+        <TargetProjector targetPos={targetUav.position} linkUp={linkUp} hudRef={hudRef} />
         <TrackerController uavIndex={uavIndex} targetUav={targetUav} />
-        
+
         <EffectComposer disableNormalPass>
-          {disturbances.atmosphericTurbulence && (
-            <TurbulenceEffect intensity={turbulenceStrength * 5.0} />
-          )}
-          {disturbances.imageNoise && (
-            <SensorNoiseEffect intensity={noiseStrength * 2.0} />
-          )}
+          <TurbulenceEffect />
+          <SensorNoiseEffect />
           <Bloom intensity={1.0} luminanceThreshold={0.5} luminanceSmoothing={0.9} />
-          <ChromaticAberration offset={[0.0005, 0.0005]} />
+          <ChromaticAberration offset={disturbances.motionBlur ? [0.0035, 0.0028] : [0.0005, 0.0005]} />
           <Vignette eskil={false} offset={0.1} darkness={0.8} />
         </EffectComposer>
       </Canvas>
-      {isLost && (
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.8), rgba(0,0,0,0.8) 2px, transparent 2px, transparent 4px), rgba(255, 0, 0, 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'column',
-          zIndex: 10
-        }}>
-          <div style={{ color: '#ff2222', fontSize: '24px', fontWeight: 'bold', letterSpacing: '2px', textShadow: '0 0 10px red' }}>
-            NO SIGNAL
-          </div>
-          <div style={{ color: '#ff2222', fontSize: '10px', marginTop: 8 }}>
-            LOS OCCLUDED
-          </div>
+      <div className="lock-hud" aria-hidden>
+        <div ref={hudRef} className={`lock-marker ${linkUp ? 'ok' : 'lost'}`}>
+          <span className="lock-corner tl" />
+          <span className="lock-corner tr" />
+          <span className="lock-corner bl" />
+          <span className="lock-corner br" />
+          <span className="lock-dot" />
+          <span className="lock-label">{linkUp ? 'CONNECTION FOUND' : 'CONNECTION BROKEN'}</span>
         </div>
-      )}
+      </div>
       {sourceUav.trackingState === 'REACQUIRING' && (
         <div style={{
           position: 'absolute',
@@ -159,7 +208,7 @@ export default function LiveCameraFeed({ sourceUav, targetUav, uavIndex }) {
           borderRadius: '50%',
           border: '2px dashed #8a7aaa',
           animation: 'pulse-reacquire 1.5s infinite linear',
-          pointerEvents: 'none'
+          pointerEvents: 'none',
         }}>
           <div style={{ position: 'absolute', top: '-18px', left: '50%', transform: 'translateX(-50%)', color: '#8a7aaa', fontSize: '9px', whiteSpace: 'nowrap', letterSpacing: '0.5px' }}>
             SCANNING

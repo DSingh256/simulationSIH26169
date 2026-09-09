@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { getSimRNG, resetSimRNG } from '../sim/seededRandom';
+import {
+  ENV_PRESETS,
+  opticalAttenuation,
+  createLinksForScenario,
+  layoutPositions,
+  linkBudget,
+} from '../sim/simConfig';
 
 export const TrackingState = {
   SEARCHING: 'SEARCHING',
@@ -9,137 +15,39 @@ export const TrackingState = {
   ACQUIRING: 'ACQUIRING',
 };
 
-// ─── Part 4: Terminal Phase Enum ───
-export const TerminalPhase = {
-  DEPLOYED: 'DEPLOYED',
-  SEARCHING: 'SEARCHING',
-  LINK_ESTABLISHING: 'LINK_ESTABLISHING',
-  COARSE_TRACK: 'COARSE_TRACK',
-  REACQUIRE: 'REACQUIRE',
-};
-
-// ─── Part 4: Scenario Labels ───
-export const ScenarioLabel = {
-  BASELINE: 'baseline',
-  TURBULENCE: 'turbulence',
-  OCCLUSION: 'occlusion',
-  SUN_GLINT: 'sun-glint',
-  DROPOUT: 'dropout',
-  COMBINED: 'combined',
-};
-
-// ─── Part 4: Detector Modes ───
-export const DetectorMode = {
-  BLOB_ONLY: 'blob_only',
-  BLOB_CNN: 'blob+CNN',
-};
-
-function createTerminalState(id) {
-  return {
-    id,
-    phase: TerminalPhase.DEPLOYED,
-    confirmedLock: false,
-    searchStartTime: 0,
-    searchProgress: 0,
-    searchYaw: 0,
-    searchPitch: 0,
-    gimbalYaw: 0,
-    gimbalPitch: 0,
-    detectionResult: null,
-    rawCandidateCount: 0,
-    confirmedCandidateCount: 0,
-    rejectedCandidateCount: 0,
-    cnnConfidence: 0,
-    trackingErrors: [],
-    reacquireCount: 0,
-    reacquireTimes: [],
-    reacquireStartT: 0,
-    lockStartT: 0,
-    consecutiveLockFrames: 0,
-  };
+function generateWaypoint(altitude = 1000, trajectoryType = 'MIXED') {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = trajectoryType === 'LINEAR' ? 400 + Math.random() * 1600 : Math.random() * 1500;
+  return [Math.cos(angle) * radius, altitude, Math.sin(angle) * radius];
 }
 
-// ─── Waypoint generation respects altitude ───
-function generateWaypoint(altitude = 1000, scenario = 'MULTI_UAV_MESH', trajectoryType = 'MIXED', index = 0) {
-  const alt = altitude;
-
-  if (scenario === 'POINT_TO_POINT') {
-    // Fly back and forth along a line
-    const side = Math.random() > 0.5 ? 1 : -1;
-    return [side * (800 + Math.random() * 400), alt, (Math.random() - 0.5) * 200];
-  } else if (scenario === 'RELAY_CHAIN') {
-    // Lined up evenly spaced along X axis
-    const slotX = (index - 3) * 600 + (Math.random() - 0.5) * 200;
-    return [slotX, alt, (Math.random() - 0.5) * 300];
-  } else if (scenario === 'STAR_TOPOLOGY') {
-    // Index 0 hovers near center, others orbit around
-    if (index === 0) {
-      return [(Math.random() - 0.5) * 100, alt, (Math.random() - 0.5) * 100];
-    }
-    const angle = (index / 5) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-    const radius = 700 + Math.random() * 300;
-    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
-  }
-
-  // MULTI_UAV_MESH / default
-  let tType = trajectoryType;
-  if (tType === 'MIXED') {
-    tType = ['LINEAR', 'CIRCULAR', 'RANDOM_WALK'][Math.floor(Math.random() * 3)];
-  }
-  
-  if (tType === 'LINEAR') {
-    const side = Math.random() > 0.5 ? 1 : -1;
-    return [side * (500 + Math.random() * 1000), alt, (Math.random() - 0.5) * 2000];
-  } else if (tType === 'CIRCULAR') {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 600 + Math.random() * 800;
-    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
-  } else {
-    // RANDOM_WALK
-    const angle = Math.random() * Math.PI * 2;
-    const radius = Math.random() * 1500;
-    return [Math.cos(angle) * radius, alt, Math.sin(angle) * radius];
-  }
-}
-
-// Generate initial UAV data
-function createUAV(id, idx, altitude = 1000, scenario = 'MULTI_UAV_MESH', trajectoryType = 'MIXED') {
-  let pos;
-  if (scenario === 'RELAY_CHAIN') {
-    pos = [(idx - 3) * 600, altitude, 0];
-  } else if (scenario === 'STAR_TOPOLOGY') {
-    if (idx === 0) {
-      pos = [0, altitude, 0];
-    } else {
-      const angle = (idx / 5) * Math.PI * 2;
-      pos = [Math.cos(angle) * 800, altitude, Math.sin(angle) * 800];
-    }
-  } else if (scenario === 'POINT_TO_POINT') {
-    const side = idx % 2 === 0 ? -1 : 1;
-    pos = [side * (600 + Math.random() * 200), altitude, (idx - 3) * 200];
-  } else {
-    // MULTI_UAV_MESH
-    const angle = (idx / 6) * Math.PI * 2;
-    const radius = 800 + Math.random() * 400;
-    pos = [Math.cos(angle) * radius, altitude, Math.sin(angle) * radius];
-  }
-
-  const queue = [
-    generateWaypoint(altitude, scenario, trajectoryType, idx),
-    generateWaypoint(altitude, scenario, trajectoryType, idx),
-    generateWaypoint(altitude, scenario, trajectoryType, idx),
+function createUAV(id, idx, opts = {}) {
+  const {
+    altitude = 1000,
+    speed = 30,
+    scenario = 'MULTI_UAV_MESH',
+    numUAVs = 6,
+    trajectoryType = 'MIXED',
+  } = opts;
+  const layout = layoutPositions(numUAVs, scenario, altitude);
+  const pos = layout[idx] || [
+    Math.cos((idx / numUAVs) * Math.PI * 2) * 900,
+    altitude,
+    Math.sin((idx / numUAVs) * Math.PI * 2) * 900,
   ];
-
+  const queue = [generateWaypoint(altitude, trajectoryType), generateWaypoint(altitude, trajectoryType), generateWaypoint(altitude, trajectoryType)];
   return {
     id,
     position: pos,
     altitude: Math.floor(pos[1]),
-    speed: 25 + Math.floor(Math.random() * 10),
-    trackingState: ['TRACKING', 'LOCKED', 'ACQUIRING', 'TRACKING', 'LOCKED', 'TRACKING'][idx],
-    links: Math.floor(Math.random() * 3) + 1,
+    speed,
+    heading: Math.atan2(pos[2], pos[0]) + Math.PI / 2,
+    orbitRadius: Math.hypot(pos[0], pos[2]) || 900,
+    trackingState: ['TRACKING', 'LOCKED', 'ACQUIRING', 'TRACKING', 'LOCKED', 'TRACKING'][idx % 6],
+    links: 0,
     battery: 60 + Math.floor(Math.random() * 30),
     linkMode: 'Auto',
-    cameraFOV: 3.0,
+    cameraFOV: 16.0,
     fps: 115 + Math.floor(Math.random() * 10),
     confidence: 0.9 + Math.random() * 0.08,
     pointingError: Math.random() * 2.5,
@@ -154,73 +62,34 @@ function createUAV(id, idx, altitude = 1000, scenario = 'MULTI_UAV_MESH', trajec
   };
 }
 
-function createInitialLinks(numUAVs, scenario = 'MULTI_UAV_MESH') {
-  const links = [];
-
-  if (scenario === 'POINT_TO_POINT') {
-    // Only adjacent pairs
-    for (let i = 0; i < numUAVs - 1; i += 2) {
-      if (i + 1 < numUAVs) {
-        links.push(createLink(i, i + 1));
-      }
-    }
-    // If odd, connect last to first pair
-    if (numUAVs % 2 !== 0 && numUAVs > 1) {
-      links.push(createLink(numUAVs - 1, 0));
-    }
-  } else if (scenario === 'RELAY_CHAIN') {
-    // Chain: 0→1→2→3→...
-    for (let i = 0; i < numUAVs - 1; i++) {
-      links.push(createLink(i, i + 1));
-    }
-  } else if (scenario === 'STAR_TOPOLOGY') {
-    // Index 0 is hub, all others connect to it
-    for (let i = 1; i < numUAVs; i++) {
-      links.push(createLink(0, i));
-    }
-  } else {
-    // MULTI_UAV_MESH: ring topology
-    for (let i = 0; i < numUAVs; i++) {
-      const j = (i + 1) % numUAVs;
-      links.push(createLink(i, j));
-    }
-  }
-  return links;
+function createFleet(numUAVs, scenario, altitude, speed, trajectoryType) {
+  return Array.from({ length: 6 }, (_, i) =>
+    createUAV(`UAV-${i + 1}`, i, { altitude, speed, scenario, numUAVs, trajectoryType })
+  );
 }
 
-function createLink(from, to) {
-  return {
-    from, to,
-    state: 'LOCKED',
-    distance: 1.5 + Math.random() * 2,
-    angularError: Math.random() * 1.5,
-    predictedError: Math.random() * 0.5,
-    confidence: 0.85 + Math.random() * 0.13,
-    receivedPower: -30 + Math.random() * 5,
-    linkMargin: 4 + Math.random() * 4,
-    losClear: true
-  };
+function withLinkCounts(uavs, links, numUAVs) {
+  const counts = Array(numUAVs).fill(0);
+  links.forEach((l) => {
+    if (l.from < numUAVs) counts[l.from]++;
+    if (l.to < numUAVs) counts[l.to]++;
+  });
+  return uavs.map((u, i) => (i < numUAVs ? { ...u, links: counts[i] } : u));
 }
 
-function createBuildings() {
-  const buildings = [];
-  for (let i = 0; i < 40; i++) {
-    buildings.push({
-      x: (Math.random() - 0.5) * 3000,
-      z: (Math.random() - 0.5) * 3000,
-      width: 100 + Math.random() * 200,
-      depth: 100 + Math.random() * 200,
-      height: 300 + Math.random() * 800
-    });
-  }
-  return buildings;
+function stamp(message, log) {
+  const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const next = [...log, { time: t, message }];
+  if (next.length > 50) next.splice(0, next.length - 50);
+  return next;
 }
 
-// Ray-AABB intersection test
+// Ray-AABB intersection test: does the line segment from p1→p2 pass through the box [min, max]?
 function rayIntersectAABB(p1, p2, min, max) {
   let tmin = 0.0;
   let tmax = 1.0;
-  const d = [p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]];
+  const d = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
+
   for (let i = 0; i < 3; i++) {
     if (Math.abs(d[i]) < 1e-6) {
       if (p1[i] < min[i] || p1[i] > max[i]) return false;
@@ -237,62 +106,71 @@ function rayIntersectAABB(p1, p2, min, max) {
   return true;
 }
 
+function createBuildings() {
+  const buildings = [];
+  for (let i = 0; i < 40; i++) {
+    buildings.push({
+      x: (Math.random() - 0.5) * 3000,
+      z: (Math.random() - 0.5) * 3000,
+      width: 100 + Math.random() * 200,
+      depth: 100 + Math.random() * 200,
+      height: 300 + Math.random() * 800,
+    });
+  }
+  return buildings;
+}
+
 function createInitialLog() {
   const now = new Date();
   const fmt = (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const entries = [];
-  for (let i = 0; i < 6; i++) {
-    const t = new Date(now.getTime() - (6 - i) * 3000);
-    entries.push({ time: fmt(t), message: [
-      'Simulation initialized',
-      'UAV nodes spawned',
-      'Link mesh established',
-      'PAT pipeline active',
-      'Coarse tracking engaged',
-      'System nominal',
-    ][i] });
+  const messages = [
+    'Simulation started',
+    'UAV-1 initialized',
+    'UAV-2 initialized',
+    'UAV-3 initialized',
+    'UAV-4 initialized',
+    'UAV-5 initialized',
+    'UAV-6 initialized',
+    'Link established: UAV-1 ↔ UAV-2',
+    'UAV-3 detected by FOV',
+    'Coarse tracking engaged: UAV-3',
+    'Turbulence intensity: 0.5',
+    'Tracking originated: UAV-3',
+  ];
+  for (let i = 0; i < messages.length; i++) {
+    const t = new Date(now.getTime() - (messages.length - i) * 3000);
+    entries.push({ time: fmt(t), message: messages[i] });
   }
   return entries;
 }
 
-// ─── Environment disturbance profiles ───
-const ENV_PROFILES = {
-  CLEAR: {
-    turbulenceBase: 0.1,
-    noiseBase: 0.1,
-    occlusionChance: 0.0,
-    visibilityRange: 8000,
-    fogDensity: 0,
-    lightIntensity: 1.0,
-  },
-  CLOUDY_DYNAMIC: {
-    turbulenceBase: 0.4,
-    noiseBase: 0.3,
-    occlusionChance: 0.15,
-    visibilityRange: 5000,
-    fogDensity: 0.3,
-    lightIntensity: 0.7,
-  },
-  OVERCAST: {
-    turbulenceBase: 0.6,
-    noiseBase: 0.5,
-    occlusionChance: 0.25,
-    visibilityRange: 3000,
-    fogDensity: 0.6,
-    lightIntensity: 0.4,
-  },
-  NIGHT: {
-    turbulenceBase: 0.3,
-    noiseBase: 0.7,
-    occlusionChance: 0.05,
-    visibilityRange: 4000,
-    fogDensity: 0.2,
-    lightIntensity: 0.1,
-  },
+const INITIAL_DISTURBANCES = {
+  atmosphericTurbulence: true,
+  platformVibration: true,
+  cameraMotion: true,
+  imageNoise: true,
+  motionBlur: true,
+  temporaryOcclusion: false,
+  weatherEffects: false,
 };
 
+function rebuildMission(state, overrides = {}) {
+  const numUAVs = overrides.numUAVs ?? state.numUAVs;
+  const scenario = overrides.scenario ?? state.scenario;
+  const trajectoryType = overrides.trajectoryType ?? state.trajectoryType;
+  const altitude = overrides.globalAltitude ?? state.globalAltitude;
+  const speed = overrides.globalSpeed ?? state.globalSpeed;
+  const links = createLinksForScenario(scenario, numUAVs);
+  const uavs = withLinkCounts(
+    createFleet(numUAVs, scenario, altitude, speed, trajectoryType),
+    links,
+    numUAVs
+  );
+  return { numUAVs, scenario, trajectoryType, globalAltitude: altitude, globalSpeed: speed, uavs, links, selectedLink: 0 };
+}
+
 export const useSimStore = create((set, get) => ({
-  // ─── Global Simulation Config ───
   numUAVs: 6,
   environment: 'CLOUDY_DYNAMIC',
   scenario: 'MULTI_UAV_MESH',
@@ -301,41 +179,31 @@ export const useSimStore = create((set, get) => ({
   simPaused: false,
   simSpeed: 1.0,
   simTime: 0,
-  simSeed: 26169,
+  simSeed: 42,
+  opticalAttenuationDbKm: opticalAttenuation('CLOUDY_DYNAMIC', false),
 
-  // ─── Environment profile (computed) ───
-  envProfile: ENV_PROFILES['CLOUDY_DYNAMIC'],
-
-  // ─── Camera / Sensor ───
-  fov: 3,
+  fov: 16,
   zoom: 1,
-  turbulenceStrength: 0.4,
+  turbulenceStrength: 0.5,
   noiseStrength: 0.3,
 
-  // ─── Per-UAV State ───
-  uavs: Array.from({ length: 6 }, (_, i) => createUAV(`UAV-${i + 1}`, i, 1000, 'MULTI_UAV_MESH', 'MIXED')),
+  globalSpeed: 30,
+  globalAltitude: 1000,
 
-  // ─── Link Matrix ───
-  links: createInitialLinks(6, 'MULTI_UAV_MESH'),
-
-  // ─── Cityscape ───
+  ...(() => {
+    const links = createLinksForScenario('MULTI_UAV_MESH', 6);
+    return {
+      uavs: withLinkCounts(createFleet(6, 'MULTI_UAV_MESH', 1000, 30, 'MIXED'), links, 6),
+      links,
+    };
+  })(),
   buildings: createBuildings(),
 
-  // ─── Disturbances ───
-  disturbances: {
-    atmosphericTurbulence: true,
-    platformVibration: true,
-    cameraMotion: true,
-    imageNoise: true,
-    motionBlur: true,
-    temporaryOcclusion: false,
-    weatherEffects: false,
-  },
+  disturbances: { ...INITIAL_DISTURBANCES },
+  occlusionTimer: 0,
 
-  // ─── Selected link for detail view ───
   selectedLink: 0,
 
-  // ─── Tracking (legacy, used by camera feed) ───
   trackingState: TrackingState.TRACKING,
   pointingError: { x: 0, y: 0 },
   cameraCorrection: { x: 0, y: 0 },
@@ -343,72 +211,13 @@ export const useSimStore = create((set, get) => ({
   detectionConfidence: 0,
   targetPosition: [0, 0, -1000],
 
-  // ─── Failure Injection ───
   sunGlintActive: false,
   occlusionActive: false,
   lowLightActive: false,
   signalDropoutActive: false,
 
-  // ═══════════════════════════════════════════════
-  // ═══ PART 4: Dual-Terminal Link Establishment ══
-  // ═══════════════════════════════════════════════
-
-  // ─── Part 4 Config ───
-  p4Scenario: ScenarioLabel.BASELINE,
-  detectorMode: DetectorMode.BLOB_CNN,
-  searchPattern: 'raster',
-  minSeparation: 800,
-  searchSpeed: 0.15,
-  linkDwellSeconds: 2.0,
-  cnnConfidenceThreshold: 0.5,
-  lockHoldSeconds: 1.0,
-
-  // ─── Part 4 Disturbance Severity ───
-  turbulenceSeverity: 0.5,
-  occlusionSeverity: 0.5,
-  sunGlintSeverity: 0.5,
-  dropoutSeverity: 0.5,
-
-  // ─── Part 4 Terminal State ───
-  terminals: {
-    A: createTerminalState('A'),
-    B: createTerminalState('B'),
-  },
-
-  // ─── Part 4 Link State ───
-  linkEstablished: false,
-  linkEstablishedT: null,
-  beamVisible: false,
-  dualLockSince: null,
-  deployT: 0,
-
-  // ─── Part 4 Live Metrics ───
-  p4Metrics: {
-    acquisitionTime: null,
-    trackingRMSE: 0,
-    falsePositiveRate: 0,
-    lockProbability: null,
-    reactionLatency: 0,
-    coarseTrackDuration: 0,
-    coarseTrackStartT: null,
-    disturbanceEventCount: 0,
-    totalRawCandidates: 0,
-    totalRejectedCandidates: 0,
-    trackingSamples: [],
-  },
-
-  // ─── Part 4 Disturbance Events Log ───
-  disturbanceEvents: [],
-
-  // ─── Part 4 Run State ───
-  p4RunActive: false,
-  p4RunId: null,
-  performanceLogOpen: false,
-
-  // ─── Metrics ───
   metricsViewActive: false,
 
-  // ─── PAT pipeline latencies (ms) ───
   patLatencies: {
     targetDetection: 0.8,
     multiTargetAssoc: 0.4,
@@ -420,7 +229,6 @@ export const useSimStore = create((set, get) => ({
     fineAlignment: 'Ready',
   },
 
-  // ─── System Performance ───
   sysPerf: {
     fps: 118,
     acqTime: 0.34,
@@ -433,181 +241,138 @@ export const useSimStore = create((set, get) => ({
     controlLoop: 8.1,
   },
 
-  // ─── Tracking history for chart ───
   trackingHistory: [],
-
-  // ─── Event Log ───
   eventLog: createInitialLog(),
 
-  // ─── Actions ───
-  setNumUAVs: (n) => set(state => {
-    const s = state.scenario;
-    const t = state.trajectoryType;
-    const a = state.globalAltitude;
-    const uavs = Array.from({ length: n }, (_, i) =>
-      i < state.uavs.length ? state.uavs[i] : createUAV(`UAV-${i + 1}`, i, a, s, t)
-    );
-    const links = createInitialLinks(n, s);
-    return { numUAVs: n, uavs, links };
+  setNumUAVs: (n) => set((state) => {
+    const rebuilt = rebuildMission(state, { numUAVs: n });
+    return { ...rebuilt, eventLog: stamp(`Fleet resized to ${n} nodes`, state.eventLog) };
   }),
-
-  setEnvironment: (env) => set(state => {
-    const profile = ENV_PROFILES[env] || ENV_PROFILES.CLEAR;
-    const logMsg = `Environment changed to ${env}`;
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: t, message: logMsg }];
-    if (log.length > 50) log.shift();
+  setEnvironment: (env) => set((state) => {
+    const weather = state.disturbances.weatherEffects;
+    const atten = opticalAttenuation(env, weather);
     return {
       environment: env,
-      envProfile: profile,
-      turbulenceStrength: profile.turbulenceBase,
-      noiseStrength: profile.noiseBase,
-      eventLog: log,
+      opticalAttenuationDbKm: atten,
+      lowLightActive: env === 'NIGHT' || env === 'OVERCAST',
+      eventLog: stamp(`Environment → ${ENV_PRESETS[env]?.label || env} (${atten.toFixed(2)} dB/km)`, state.eventLog),
     };
   }),
-
-  setScenario: (s) => set(state => {
-    const n = state.numUAVs;
-    const a = state.globalAltitude;
-    const traj = state.trajectoryType;
-    const uavs = Array.from({ length: n }, (_, i) => createUAV(`UAV-${i + 1}`, i, a, s, traj));
-    const links = createInitialLinks(n, s);
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: t, message: `Scenario changed to ${s.replace(/_/g, ' ')}` }];
-    if (log.length > 50) log.shift();
-    return { scenario: s, uavs, links, eventLog: log };
+  setScenario: (s) => set((state) => {
+    const rebuilt = rebuildMission(state, { scenario: s });
+    return { ...rebuilt, eventLog: stamp(`Scenario → ${s.replace(/_/g, ' ')}`, state.eventLog) };
   }),
-
-  setTrajectoryType: (t) => set(state => {
-    const n = state.numUAVs;
-    const a = state.globalAltitude;
-    const s = state.scenario;
-    const uavs = Array.from({ length: n }, (_, i) => createUAV(`UAV-${i + 1}`, i, a, s, t));
-    const msg = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: msg, message: `Trajectory changed to ${t}` }];
-    if (log.length > 50) log.shift();
-    return { trajectoryType: t, uavs, eventLog: log };
+  setTrajectoryType: (t) => set((state) => {
+    const rebuilt = rebuildMission(state, { trajectoryType: t });
+    return { ...rebuilt, eventLog: stamp(`Trajectory → ${t.replace(/_/g, ' ')}`, state.eventLog) };
   }),
-
-  setSimRunning: (r) => set({ simRunning: r }),
+  setSimRunning: (r) => set((state) => ({
+    simRunning: r,
+    simPaused: r ? false : state.simPaused,
+  })),
   setSimPaused: (p) => set({ simPaused: p }),
+  togglePause: () => set((state) => {
+    if (!state.simRunning) return { simRunning: true, simPaused: false };
+    return { simPaused: !state.simPaused };
+  }),
+  stopSim: () => set({ simRunning: false, simPaused: false }),
+  startSim: () => set({ simRunning: true, simPaused: false }),
   setSimSpeed: (s) => set({ simSpeed: s }),
   setSimTime: (t) => set({ simTime: t }),
-  
-  // Target overrides for all UAVs
-  globalSpeed: 30,
-  globalAltitude: 1000,
-  setGlobalSpeed: (v) => set(state => {
-    const uavs = state.uavs.map(u => ({ ...u, speed: v }));
+
+  setGlobalSpeed: (v) => set((state) => {
+    const uavs = state.uavs.map((u) => ({ ...u, speed: v }));
     return { globalSpeed: v, uavs };
   }),
-
-  // When altitude changes: move all UAVs to new altitude, regenerate their waypoints
-  // at that altitude, and force all links into ACQUIRING state to simulate re-establishment
-  setGlobalAltitude: (v) => set(state => {
-    const s = state.scenario;
-    const traj = state.trajectoryType;
-    const uavs = state.uavs.map((u, i) => {
-      // Regenerate waypoint queue at new altitude
-      const newQueue = [
-        generateWaypoint(v, s, traj, i),
-        generateWaypoint(v, s, traj, i),
-        generateWaypoint(v, s, traj, i),
-      ];
-      return {
-        ...u,
-        altitude: v,
-        position: [u.position[0], v, u.position[2]],
-        waypointQueue: newQueue,
-        currentTarget: newQueue[0],
-      };
-    });
-
-    // Force links into ACQUIRING so they re-establish at new altitude
-    const links = state.links.map(l => ({
-      ...l,
-      state: 'ACQUIRING',
-      confidence: 0.2,
+  setGlobalAltitude: (v) => set((state) => {
+    const uavs = state.uavs.map((u) => ({
+      ...u,
+      altitude: v,
+      position: [u.position[0], v, u.position[2]],
+      currentTarget: u.currentTarget ? [u.currentTarget[0], v, u.currentTarget[2]] : u.currentTarget,
+      waypointQueue: (u.waypointQueue || []).map((w) => [w[0], v, w[2]]),
     }));
-
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: t, message: `Altitude changed to ${v}m — links re-establishing` }];
-    if (log.length > 50) log.shift();
-
-    return { globalAltitude: v, uavs, links, eventLog: log };
+    return { globalAltitude: v, uavs };
   }),
 
-  setDisturbance: (key, val) => set(state => {
-    const newDist = { ...state.disturbances, [key]: val };
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: t, message: `${key}: ${val ? 'ON' : 'OFF'}` }];
-    if (log.length > 50) log.shift();
-    return { disturbances: newDist, eventLog: log };
+  setDisturbance: (key, val) => set((state) => {
+    const disturbances = { ...state.disturbances, [key]: val };
+    const weather = disturbances.weatherEffects;
+    const atten = opticalAttenuation(state.environment, weather);
+    const turbulenceStrength = disturbances.atmosphericTurbulence ? 0.7 : 0.05;
+    const noiseStrength = disturbances.imageNoise ? 0.45 : 0.04;
+    let eventLog = stamp(`${val ? 'Enabled' : 'Disabled'} ${key}`, state.eventLog);
+    if (key === 'weatherEffects') {
+      eventLog = stamp(
+        val
+          ? `Weather ON — rain field + ${atten.toFixed(2)} dB/km link penalty`
+          : `Weather OFF — attenuation ${atten.toFixed(2)} dB/km`,
+        eventLog
+      );
+    }
+    return {
+      disturbances,
+      opticalAttenuationDbKm: atten,
+      turbulenceStrength,
+      noiseStrength,
+      occlusionActive: key === 'temporaryOcclusion' ? val && state.occlusionActive : (disturbances.temporaryOcclusion ? state.occlusionActive : false),
+      eventLog,
+    };
   }),
 
   setSelectedLink: (idx) => set({ selectedLink: idx }),
 
-  // Legacy actions
   setTargetPosition: (pos) => set({ targetPosition: pos }),
-  setDetection: (uavIndex, box, confidence) => set(state => {
+  setDetection: (uavIndex, box, confidence) => set((state) => {
     const uavs = [...state.uavs];
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], confidence, detectionBox: box };
     return { detectionBox: box, detectionConfidence: confidence, uavs };
   }),
-  setTrackingState: (uavIndex, stateVal) => set(state => {
+  setTrackingState: (uavIndex, stateVal) => set((state) => {
     const uavs = [...state.uavs];
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], trackingState: stateVal };
     return { trackingState: stateVal, uavs };
   }),
-  setMotionOverrideActive: (idx, active) => set(state => {
+  setMotionOverrideActive: (idx, active) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) uavs[idx] = { ...uavs[idx], overrideActive: active };
+    if (uavs[idx]) uavs[idx] = { ...uavs[idx], overrideActive: active };
     return { uavs };
   }),
-  setOverrideTarget: (idx, pos) => set(state => {
+  setOverrideTarget: (idx, pos) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) uavs[idx] = { ...uavs[idx], overrideTarget: pos };
+    if (uavs[idx]) uavs[idx] = { ...uavs[idx], overrideTarget: pos };
     return { uavs };
   }),
-  setReacquireState: (idx, startTime, lastKnownPos) => set(state => {
+  setReacquireState: (idx, startTime, lastKnownPos) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) uavs[idx] = { ...uavs[idx], reacquireStartTime: startTime, lastKnownPosition: lastKnownPos, consecutiveLockFrames: 0 };
+    if (uavs[idx]) uavs[idx] = { ...uavs[idx], reacquireStartTime: startTime, lastKnownPosition: lastKnownPos, consecutiveLockFrames: 0 };
     return { uavs };
   }),
-  incrementConsecutiveLockFrames: (idx) => set(state => {
+  incrementConsecutiveLockFrames: (idx) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: (uavs[idx].consecutiveLockFrames || 0) + 1 };
+    if (uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: (uavs[idx].consecutiveLockFrames || 0) + 1 };
     return { uavs };
   }),
-  resetConsecutiveLockFrames: (idx) => set(state => {
+  resetConsecutiveLockFrames: (idx) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: 0 };
+    if (uavs[idx]) uavs[idx] = { ...uavs[idx], consecutiveLockFrames: 0 };
     return { uavs };
   }),
-  popWaypoint: (idx) => set(state => {
+  popWaypoint: (idx) => set((state) => {
     const uavs = [...state.uavs];
-    if(uavs[idx]) {
+    if (uavs[idx]) {
       const q = [...uavs[idx].waypointQueue];
       q.shift();
-      q.push(generateWaypoint(state.globalAltitude, state.scenario, state.trajectoryType, idx));
+      q.push(generateWaypoint(state.globalAltitude, state.trajectoryType));
       uavs[idx] = { ...uavs[idx], waypointQueue: q, currentTarget: q[0] };
     }
     return { uavs };
   }),
-  setPointingError: (uavIndex, err) => set(state => {
+  setPointingError: (uavIndex, err) => set((state) => {
     const uavs = [...state.uavs];
-    const errMag = Math.sqrt(err.x*err.x + err.y*err.y) * 1000;
+    const errMag = Math.sqrt(err.x * err.x + err.y * err.y) * 1000;
     if (uavs[uavIndex]) uavs[uavIndex] = { ...uavs[uavIndex], pointingError: errMag };
-    
-    const history = [...state.trackingHistory];
-    history.push({
-      time: state.simTime.toFixed(1),
-      actual: errMag,
-      predicted: errMag * 0.8
-    });
-    if (history.length > 50) history.shift();
-
-    return { pointingError: err, uavs, trackingHistory: history };
+    return { pointingError: err, uavs };
   }),
   setCameraCorrection: (corr) => set({ cameraCorrection: corr }),
   setTurbulenceStrength: (val) => set({ turbulenceStrength: val }),
@@ -619,39 +384,144 @@ export const useSimStore = create((set, get) => ({
     if (duration > 0) setTimeout(() => set({ [type]: false }), duration);
   },
 
-  // UAV position updates (called from 3D world tick)
-  updateUAVPosition: (idx, pos, alt) => set(state => {
+  updateUAVPosition: (idx, pos, alt) => set((state) => {
     const uavs = [...state.uavs];
     uavs[idx] = { ...uavs[idx], position: pos, altitude: Math.floor(alt) };
     return { uavs };
   }),
 
-  // Physical Line-of-Sight check against ALL buildings
-  updateLinksLOS: () => set(state => {
-    const newLinks = [...state.links];
-    let changed = false;
+  updateLinksLOS: () => {},
+
+  updateLink: (idx, data) => set((state) => {
+    const links = [...state.links];
+    links[idx] = { ...links[idx], ...data };
+    return { links };
+  }),
+
+  addEvent: (message) => set((state) => ({ eventLog: stamp(message, state.eventLog) })),
+
+  addTrackingPoint: (point) => set((state) => {
+    const hist = [...state.trackingHistory, point];
+    if (hist.length > 250) hist.shift();
+    return { trackingHistory: hist };
+  }),
+
+  /**
+   * Single batched tick: clock, UAV flight dynamics, optical budget, LOS, telemetry.
+   * `rawDelta` is the R3F frame delta in seconds.
+   */
+  stepPhysics: (rawDelta) => set((state) => {
+    if (!state.simRunning || state.simPaused) return {};
+
+    const dt = Math.min(Math.max(rawDelta, 0), 0.05) * state.simSpeed;
+    if (dt <= 0) return {};
+
+    const simTime = state.simTime + dt;
+    const { disturbances, buildings, numUAVs, trajectoryType, globalAltitude, globalSpeed } = state;
+    const weatherOn = disturbances.weatherEffects;
+    const atten = opticalAttenuation(state.environment, weatherOn);
     const logEntries = [];
 
-    // Altitude-based link degradation: lower altitude → higher chance of building occlusion
-    // This is handled naturally by the ray-AABB check since UAVs at lower altitude
-    // are more likely to be blocked by buildings
+    const uavs = state.uavs.map((u) => ({ ...u, position: [...u.position], waypointQueue: [...(u.waypointQueue || [])] }));
+
+    for (let i = 0; i < numUAVs; i++) {
+      const uav = uavs[i];
+      let [x, y, z] = uav.position;
+      const speed = (uav.speed || globalSpeed);
+
+      if (uav.overrideActive && uav.overrideTarget) {
+        const dx = uav.overrideTarget[0] - x;
+        const dy = uav.overrideTarget[1] - y;
+        const dz = uav.overrideTarget[2] - z;
+        const dist = Math.hypot(dx, dy, dz) || 1;
+        const step = speed * 18 * dt;
+        x += (dx / dist) * step;
+        y += (dy / dist) * step;
+        z += (dz / dist) * step;
+      } else if (trajectoryType === 'CIRCULAR') {
+        const r = uav.orbitRadius || 900;
+        const omega = speed / Math.max(r, 80);
+        const heading = (uav.heading || 0) + omega * dt;
+        uav.heading = heading;
+        x = Math.cos(heading) * r;
+        z = Math.sin(heading) * r;
+        y += (globalAltitude - y) * Math.min(1, 1.8 * dt);
+      } else if (trajectoryType === 'LINEAR') {
+        let heading = uav.heading || 0;
+        x += Math.cos(heading) * speed * 16 * dt;
+        z += Math.sin(heading) * speed * 16 * dt;
+        if (Math.abs(x) > 1800 || Math.abs(z) > 1800) {
+          heading += Math.PI * 0.7;
+          uav.heading = heading;
+        }
+        y += (globalAltitude - y) * Math.min(1, 1.8 * dt);
+      } else {
+        const targetPos = uav.currentTarget;
+        if (targetPos) {
+          const dx = targetPos[0] - x;
+          const dz = targetPos[2] - z;
+          const dy = globalAltitude - y;
+          const dist = Math.hypot(dx, dy, dz);
+          if (dist < 60) {
+            const q = [...uav.waypointQueue];
+            q.shift();
+            q.push(generateWaypoint(globalAltitude, trajectoryType));
+            uav.waypointQueue = q;
+            uav.currentTarget = q[0];
+          } else if (dist > 1) {
+            const moveSpeed = speed * 20;
+            x += (dx / dist) * moveSpeed * dt;
+            y += (dy / dist) * moveSpeed * dt;
+            z += (dz / dist) * moveSpeed * dt;
+          }
+        }
+      }
+
+      if (disturbances.atmosphericTurbulence) {
+        x += Math.sin(simTime * 3.1 + i) * 22 * dt;
+        z += Math.cos(simTime * 2.7 + i * 1.3) * 22 * dt;
+        y += Math.sin(simTime * 4.2 + i) * 10 * dt;
+      }
+      if (disturbances.platformVibration) {
+        x += (Math.random() - 0.5) * 6 * dt * 60;
+        y += (Math.random() - 0.5) * 4 * dt * 60;
+        z += (Math.random() - 0.5) * 6 * dt * 60;
+      }
+
+      y = Math.max(80, y);
+      uav.position = [x, y, z];
+      uav.altitude = Math.floor(y);
+      uav.speed = speed;
+    }
+
+    let occlusionActive = state.occlusionActive;
+    let occlusionTimer = state.occlusionTimer || 0;
+    if (disturbances.temporaryOcclusion) {
+      occlusionTimer -= dt;
+      if (occlusionTimer <= 0) {
+        occlusionActive = !occlusionActive;
+        occlusionTimer = occlusionActive ? 1.2 + Math.random() * 2.2 : 3 + Math.random() * 5;
+        logEntries.push(occlusionActive ? 'Occlusion burst — FOV obstructed' : 'Occlusion cleared');
+      }
+    } else {
+      occlusionActive = false;
+      occlusionTimer = 0;
+    }
+
+    const newLinks = state.links.map((link) => ({ ...link }));
+    let avgErr = 0;
+    let maxErr = 0;
+    let locked = 0;
 
     for (let i = 0; i < newLinks.length; i++) {
       const link = newLinks[i];
-      if (link.from >= state.numUAVs || link.to >= state.numUAVs) continue;
+      if (link.from >= numUAVs || link.to >= numUAVs) continue;
+      const p1 = uavs[link.from].position;
+      const p2 = uavs[link.to].position;
+      const distM = Math.hypot(p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]);
 
-      const p1 = state.uavs[link.from].position;
-      const p2 = state.uavs[link.to].position;
-
-      // Calculate distance between UAVs for link quality
-      const dx = p2[0] - p1[0];
-      const dy = p2[1] - p1[1];
-      const dz = p2[2] - p1[2];
-      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) / 1000; // km
-
-      // Test ray against every building
       let occluded = false;
-      for (const b of state.buildings) {
+      for (const b of buildings) {
         const bmin = [b.x - b.width / 2, 0, b.z - b.depth / 2];
         const bmax = [b.x + b.width / 2, b.height, b.z + b.depth / 2];
         if (rayIntersectAABB(p1, p2, bmin, bmax)) {
@@ -659,275 +529,132 @@ export const useSimStore = create((set, get) => ({
           break;
         }
       }
+      if (disturbances.temporaryOcclusion && occlusionActive && i === 0) occluded = true;
 
-      // Environment-based random occlusion (weather effects)
-      if (!occluded && state.disturbances.weatherEffects) {
-        const envOccChance = state.envProfile.occlusionChance;
-        if (Math.random() < envOccChance * 0.02) {
-          occluded = true;
-        }
-      }
+      let basePointing = 0.6 + Math.sin(simTime * 1.7 + i) * 0.35;
+      if (disturbances.atmosphericTurbulence) basePointing += 1.4 + Math.random() * 2.2;
+      if (disturbances.platformVibration) basePointing += 0.8 + Math.random() * 1.4;
+      if (disturbances.cameraMotion) basePointing += 0.4;
+      if (weatherOn) basePointing += 1.1;
 
-      // Temporary occlusion disturbance toggle
-      if (!occluded && state.disturbances.temporaryOcclusion) {
-        if (Math.random() < 0.005) {
-          occluded = true;
-        }
-      }
+      const budget = linkBudget({
+        distM,
+        attenuationDbKm: atten,
+        weatherOn,
+        pointingUrad: basePointing,
+        turbulence: disturbances.atmosphericTurbulence,
+        vibration: disturbances.platformVibration,
+      });
 
-      // State transitions
+      let next = {
+        ...link,
+        distance: budget.distKm,
+        angularError: basePointing,
+        predictedError: basePointing * 0.78,
+        receivedPower: budget.receivedPower,
+        linkMargin: budget.linkMargin,
+      };
+
       if (occluded && link.losClear) {
-        newLinks[i] = { ...link, losClear: false, state: 'LOST', confidence: 0, distance: dist };
-        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} LOST — obstruction`);
-        changed = true;
+        next = { ...next, losClear: false, state: 'LOST', confidence: 0 };
+        logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} LOST — obstruction`);
       } else if (!occluded && !link.losClear) {
-        newLinks[i] = { ...link, losClear: true, state: 'ACQUIRING', confidence: 0.3, distance: dist };
-        logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} re-acquiring`);
-        changed = true;
+        next = { ...next, losClear: true, state: 'ACQUIRING', confidence: 0.3 };
+        logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} re-acquiring — LOS clear`);
       } else if (!occluded && link.state === 'ACQUIRING') {
-        // Environment affects re-acquisition speed
-        const acqSpeed = state.envProfile.lightIntensity * 0.02;
-        const newConf = link.confidence + acqSpeed;
+        const newConf = link.confidence + 0.35 * dt;
         if (newConf >= 0.9) {
-          newLinks[i] = { ...link, state: 'LOCKED', confidence: 0.95, distance: dist };
-          logEntries.push(`Link UAV-${link.from+1}↔UAV-${link.to+1} LOCKED`);
+          next = { ...next, state: 'LOCKED', confidence: 0.95 };
+          logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} LOCKED`);
         } else {
-          newLinks[i] = { ...link, confidence: newConf, distance: dist };
+          next = { ...next, confidence: newConf };
         }
-        changed = true;
-      } else if (!occluded && link.state === 'LOCKED') {
-        // Update distance and link metrics
-        const envNoise = state.disturbances.atmosphericTurbulence ? state.envProfile.turbulenceBase * Math.random() : 0;
-        const imgNoise = state.disturbances.imageNoise ? state.envProfile.noiseBase * Math.random() * 0.5 : 0;
-        const vibration = state.disturbances.platformVibration ? Math.random() * 0.3 : 0;
-        
-        const angError = (0.2 + envNoise + imgNoise + vibration) * (1 + dist * 0.1);
-        const margin = Math.max(0, 8 - dist * 1.5 - envNoise * 3);
-        const rxPow = -25 - dist * 3 - envNoise * 5;
-
-        newLinks[i] = {
-          ...link,
-          distance: dist,
-          angularError: angError,
-          predictedError: angError * 0.7,
-          linkMargin: margin,
-          receivedPower: rxPow,
-          confidence: Math.max(0.85, 1 - angError * 0.05),
-        };
-        changed = true;
+      } else if (!occluded && (link.state === 'LOCKED' || link.state === 'TRACKING')) {
+        if (budget.linkMargin < 1.5) {
+          next = { ...next, state: 'ACQUIRING', confidence: Math.max(0.35, link.confidence - 0.2) };
+          logEntries.push(`Link UAV-${link.from + 1}↔UAV-${link.to + 1} fading — low margin`);
+        } else {
+          next = { ...next, state: 'LOCKED', confidence: Math.min(0.99, 0.88 + budget.linkMargin / 40) };
+        }
       }
+
+      avgErr += next.angularError;
+      maxErr = Math.max(maxErr, next.angularError);
+      if (next.state === 'LOCKED') locked++;
+      newLinks[i] = next;
     }
 
-    if (logEntries.length > 0) {
-      const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const log = [...state.eventLog];
-      logEntries.forEach(msg => log.push({ time: t, message: msg }));
-      if (log.length > 50) log.splice(0, log.length - 50);
-      return changed ? { links: newLinks, eventLog: log } : {};
+    const linkN = Math.max(newLinks.length, 1);
+    avgErr /= linkN;
+
+    const history = [...state.trackingHistory];
+    history.push({
+      time: simTime.toFixed(1),
+      actual: avgErr,
+      predicted: avgErr * 0.8,
+    });
+    if (history.length > 80) history.shift();
+
+    const weatherLatency = weatherOn ? 0.35 : 0;
+    const turbLatency = disturbances.atmosphericTurbulence ? 0.2 : 0;
+    const patLatencies = {
+      ...state.patLatencies,
+      targetDetection: 0.7 + Math.random() * 0.3 + weatherLatency,
+      multiTargetAssoc: 0.35 + Math.random() * 0.15,
+      stateEstimation: 1.05 + Math.random() * 0.3 + turbLatency,
+      motionPrediction: 0.25 + Math.random() * 0.12,
+      pointingControl: 0.45 + Math.random() * 0.2 + (disturbances.platformVibration ? 0.25 : 0),
+      cameraActuation: 0.5 + Math.random() * 0.2 + (disturbances.cameraMotion ? 0.2 : 0),
+      coarseAlignment: occlusionActive ? 'Hold' : 'Ready',
+      fineAlignment: newLinks[0]?.state === 'LOCKED' ? 'Locked' : 'Seek',
+    };
+
+    const lockRetention = (locked / linkN) * 100;
+    const sysPerf = {
+      fps: Math.round(1 / Math.max(rawDelta, 1 / 120)),
+      acqTime: +(0.28 + (weatherOn ? 0.18 : 0) + (occlusionActive ? 0.22 : 0)).toFixed(2),
+      reacqTime: +(0.4 + (weatherOn ? 0.25 : 0) + atten * 0.04).toFixed(2),
+      avgTrackError: +avgErr.toFixed(2),
+      maxTrackError: +maxErr.toFixed(2),
+      lockRetention: +lockRetention.toFixed(1),
+      falseDetection: +(0.4 + (disturbances.imageNoise ? 0.5 : 0) + (weatherOn ? 0.4 : 0)).toFixed(1),
+      inferenceTime: +(1.1 + Math.random() * 0.4).toFixed(1),
+      controlLoop: +(7.6 + (disturbances.platformVibration ? 1.4 : 0) + state.simSpeed * 0.2).toFixed(1),
+    };
+
+    let eventLog = state.eventLog;
+    if (logEntries.length) {
+      logEntries.forEach((msg) => { eventLog = stamp(msg, eventLog); });
     }
 
-    return changed ? { links: newLinks } : {};
-  }),
-
-  // Update link state
-  updateLink: (idx, data) => set(state => {
-    const links = [...state.links];
-    links[idx] = { ...links[idx], ...data };
-    return { links };
-  }),
-
-  addEvent: (message) => set(state => {
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const log = [...state.eventLog, { time: t, message }];
-    if (log.length > 50) log.shift();
-    return { eventLog: log };
-  }),
-
-  addTrackingPoint: (point) => set(state => {
-    const hist = [...state.trackingHistory, point];
-    if (hist.length > 250) hist.shift();
-    return { trackingHistory: hist };
-  }),
-
-  resetSim: () => set(state => ({
-    simTime: 0,
-    simRunning: false,
-    simPaused: false,
-    uavs: Array.from({ length: state.numUAVs }, (_, i) => createUAV(`UAV-${i + 1}`, i, state.globalAltitude, state.scenario, state.trajectoryType)),
-    links: createInitialLinks(state.numUAVs, state.scenario),
-    trackingHistory: [],
-    eventLog: createInitialLog(),
-  })),
-
-  // ═══════════════════════════════════════
-  // ═══ PART 4 ACTIONS ═══════════════════
-  // ═══════════════════════════════════════
-
-  setP4Scenario: (s) => set({ p4Scenario: s }),
-  setDetectorMode: (m) => set({ detectorMode: m }),
-  setSearchPattern: (p) => set({ searchPattern: p }),
-  setLinkDwellSeconds: (v) => set({ linkDwellSeconds: v }),
-  setTurbulenceSeverity: (v) => set({ turbulenceSeverity: v }),
-  setOcclusionSeverity: (v) => set({ occlusionSeverity: v }),
-  setSunGlintSeverity: (v) => set({ sunGlintSeverity: v }),
-  setDropoutSeverity: (v) => set({ dropoutSeverity: v }),
-  setPerformanceLogOpen: (v) => set({ performanceLogOpen: v }),
-
-  updateTerminal: (id, data) => set(state => ({
-    terminals: {
-      ...state.terminals,
-      [id]: { ...state.terminals[id], ...data },
-    },
-  })),
-
-  updateP4Metrics: (data) => set(state => ({
-    p4Metrics: { ...state.p4Metrics, ...data },
-  })),
-
-  addDisturbanceEvent: (evt) => set(state => ({
-    disturbanceEvents: [...state.disturbanceEvents, evt],
-    p4Metrics: {
-      ...state.p4Metrics,
-      disturbanceEventCount: state.p4Metrics.disturbanceEventCount + 1,
-    },
-  })),
-
-  setLinkEstablished: (t) => set(state => {
-    const acqTime = t - state.deployT;
     return {
-      linkEstablished: true,
-      linkEstablishedT: t,
-      beamVisible: true,
-      p4Metrics: {
-        ...state.p4Metrics,
-        acquisitionTime: acqTime,
-        coarseTrackStartT: t,
-      },
+      simTime,
+      uavs: withLinkCounts(uavs, newLinks, numUAVs),
+      links: newLinks,
+      trackingHistory: history,
+      opticalAttenuationDbKm: atten,
+      occlusionActive,
+      occlusionTimer,
+      patLatencies,
+      sysPerf,
+      eventLog,
     };
   }),
 
-  setBeamVisible: (v) => set({ beamVisible: v }),
-  setDualLockSince: (t) => set({ dualLockSince: t }),
-
-  /** Part 4 Reset — spawns terminals at seeded positions, clears run state */
-  resetPart4: (scenario, detectorMode, seed) => {
-    const rng = resetSimRNG(seed || 26169);
-    const minSep = get().minSeparation;
-
-    // Deterministic terminal positions with enforced min separation
-    let ax, az, bx, bz;
-    let attempts = 0;
-    do {
-      ax = rng.range(-1200, 1200);
-      az = rng.range(-1200, 1200);
-      bx = rng.range(-1200, 1200);
-      bz = rng.range(-1200, 1200);
-      attempts++;
-    } while (
-      Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2) < minSep && attempts < 100
-    );
-
-    const alt = get().globalAltitude || 1000;
-
-    // Update UAV positions — UAV-1 = Terminal A, UAV-2 = Terminal B
-    const uavs = get().uavs.map((u, i) => {
-      if (i === 0) return { ...u, position: [ax, alt, az], trackingState: 'SEARCHING' };
-      if (i === 1) return { ...u, position: [bx, alt, bz], trackingState: 'SEARCHING' };
-      return u;
-    });
-
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-    set({
+  resetSim: () => set((state) => {
+    const rebuilt = rebuildMission(state);
+    return {
+      ...rebuilt,
       simTime: 0,
-      simRunning: true,
+      simRunning: false,
       simPaused: false,
-      simSeed: seed || 26169,
-      p4Scenario: scenario || ScenarioLabel.BASELINE,
-      detectorMode: detectorMode || DetectorMode.BLOB_CNN,
-      uavs,
-      terminals: {
-        A: createTerminalState('A'),
-        B: createTerminalState('B'),
-      },
-      linkEstablished: false,
-      linkEstablishedT: null,
-      beamVisible: false,
-      dualLockSince: null,
-      deployT: 0,
-      p4Metrics: {
-        acquisitionTime: null,
-        trackingRMSE: 0,
-        falsePositiveRate: 0,
-        lockProbability: null,
-        reactionLatency: 0,
-        coarseTrackDuration: 0,
-        coarseTrackStartT: null,
-        disturbanceEventCount: 0,
-        totalRawCandidates: 0,
-        totalRejectedCandidates: 0,
-        trackingSamples: [],
-      },
-      disturbanceEvents: [],
-      p4RunActive: true,
-      p4RunId: `run-${Date.now()}-${Math.floor(rng.next() * 10000)}`,
       trackingHistory: [],
-      eventLog: [
-        { time: t, message: `Part 4 reset — scenario: ${scenario || 'baseline'}, mode: ${detectorMode || 'blob+CNN'}, seed: ${seed || 26169}` },
-        { time: t, message: 'Terminals A & B deployed' },
-      ],
-    });
-  },
-
-  /** Finish the current Part 4 run — returns the performance row */
-  finishP4Run: () => {
-    const state = get();
-    if (!state.p4RunActive) return null;
-
-    const metrics = state.p4Metrics;
-    const samples = metrics.trackingSamples;
-    const rmse = samples.length > 0
-      ? Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length)
-      : 0;
-
-    const fpr = metrics.totalRawCandidates > 0
-      ? metrics.totalRejectedCandidates / metrics.totalRawCandidates
-      : 0;
-
-    const coarseDur = metrics.coarseTrackStartT !== null
-      ? state.simTime - metrics.coarseTrackStartT
-      : 0;
-
-    const termA = state.terminals.A;
-    const termB = state.terminals.B;
-    const totalReacq = termA.reacquireCount + termB.reacquireCount;
-    const allReacqTimes = [...termA.reacquireTimes, ...termB.reacquireTimes];
-    const meanReacqTime = allReacqTimes.length > 0
-      ? allReacqTimes.reduce((a, b) => a + b, 0) / allReacqTimes.length
-      : 0;
-
-    const row = {
-      run_id: state.p4RunId,
-      timestamp: new Date().toISOString(),
-      scenario: state.p4Scenario,
-      detector_mode: state.detectorMode,
-      acquisition_time: metrics.acquisitionTime !== null ? +metrics.acquisitionTime.toFixed(3) : null,
-      tracking_RMSE: +rmse.toFixed(4),
-      false_positive_rate: +fpr.toFixed(4),
-      lock_probability: metrics.lockProbability,
-      reacquire_count: totalReacq,
-      mean_reacquire_time: +meanReacqTime.toFixed(3),
-      disturbance_events: metrics.disturbanceEventCount,
+      occlusionActive: false,
+      occlusionTimer: 0,
+      cameraCorrection: { x: 0, y: 0 },
+      pointingError: { x: 0, y: 0 },
+      opticalAttenuationDbKm: opticalAttenuation(state.environment, state.disturbances.weatherEffects),
+      eventLog: stamp('Simulation reset', createInitialLog()),
     };
-
-    set({
-      p4RunActive: false,
-      p4Metrics: { ...metrics, coarseTrackDuration: coarseDur },
-    });
-
-    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    get().addEvent(`Run finished: ${state.p4RunId}`);
-
-    return row;
-  },
+  }),
 }));

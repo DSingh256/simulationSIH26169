@@ -16,6 +16,10 @@ export default function LinkAnalysis() {
           <span className="value">{(link.distance || 0).toFixed(2)} km</span>
         </div>
         <div className="data-row">
+          <span className="label">Attenuation</span>
+          <span className="value">{(store.opticalAttenuationDbKm ?? 0).toFixed(2)} dB/km</span>
+        </div>
+        <div className="data-row">
           <span className="label">LOS</span>
           {link.losClear ? (
             <span className="value" style={{ color: 'var(--accent-green)' }}>✓ Clear</span>
@@ -37,7 +41,7 @@ export default function LinkAnalysis() {
         </div>
         <div className="data-row">
           <span className="label">Rel. Velocity</span>
-          <span className="value">{(Math.random() * 5 + 15).toFixed(1)} m/s</span>
+          <span className="value">{store.globalSpeed.toFixed(1)} m/s</span>
         </div>
         <div className="data-row">
           <span className="label">Rx Power</span>

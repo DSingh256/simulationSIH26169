@@ -32,6 +32,10 @@ export default function LeftSidebar() {
           <option value="OVERCAST">Overcast</option>
           <option value="NIGHT">Night</option>
         </select>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', marginTop: 3, color: 'var(--text-muted)' }}>
+          <span>Atten.</span>
+          <span className="mono">{(store.opticalAttenuationDbKm ?? 0).toFixed(2)} dB/km</span>
+        </div>
 
         <label style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'block', marginTop: 6, marginBottom: 2 }}>Scenario</label>
         <select className="sim-select" value={store.scenario} onChange={e => store.setScenario(e.target.value)}>
@@ -89,19 +93,19 @@ export default function LeftSidebar() {
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           <button 
             className="sim-btn sim-btn-primary" 
-            onClick={() => { store.setSimRunning(true); store.setSimPaused(false); }}
+            onClick={() => store.startSim()}
           >▶ Start</button>
           <button 
             className="sim-btn" 
-            onClick={() => store.setSimPaused(!store.simPaused)}
-          >⏸ Pause</button>
+            onClick={() => store.togglePause()}
+          >{store.simPaused && store.simRunning ? '▶ Resume' : '⏸ Pause'}</button>
           <button 
             className="sim-btn" 
             onClick={() => store.resetSim()}
           >↺ Reset</button>
           <button 
             className="sim-btn sim-btn-danger" 
-            onClick={() => store.setSimRunning(false)}
+            onClick={() => store.stopSim()}
           >⏹ Stop</button>
         </div>
       </div>
@@ -122,7 +126,7 @@ export default function LeftSidebar() {
           {[0.25, 0.5, 1, 2, 5, 10].map(v => (
             <button 
               key={v}
-              className="sim-btn" 
+              className={store.simSpeed === v ? 'sim-btn sim-btn-primary' : 'sim-btn'}
               style={{ padding: '2px 5px', fontSize: '8px' }}
               onClick={() => store.setSimSpeed(v)}
             >{v}x</button>

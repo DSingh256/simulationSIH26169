@@ -85,6 +85,11 @@ export default function RightSidebar() {
                     key={`c${col}`} 
                     className={`link-matrix-cell ${link ? 'active' : ''}`}
                     style={link ? { cursor: 'pointer' } : {}}
+                    onClick={() => {
+                      if (!link) return;
+                      const idx = links.findIndex(l => (l.from === row && l.to === col) || (l.from === col && l.to === row));
+                      if (idx >= 0) useSimStore.getState().setSelectedLink(idx);
+                    }}
                   >
                     {link ? '●' : ''}
                   </div>
